@@ -543,6 +543,8 @@ async function runRJMCMCAnalysis(settings = {}) {
                 if (now - rjmcState.lastPlotUpdate > 200) {
                     updateComponentDistribution();
                     updateMixtureFit();
+                    // Ensure raw data is always visible
+                    showRawDataVisualization();
                     rjmcState.lastPlotUpdate = now;
                 }
                 
@@ -1787,6 +1789,7 @@ function updateMixtureFit() {
     const ctx = canvas.getContext('2d');
     
     if (mixtureFitChart) {
+        console.log('[RJMCMC] Destroying existing mixture fit chart');
         mixtureFitChart.destroy();
         mixtureFitChart = null;
     }
@@ -1832,6 +1835,8 @@ function updateMixtureFit() {
         }
         
         console.log('[RJMCMC] K values to plot:', topKValues);
+        console.log('[RJMCMC] Available K values in kPosteriorSamples:', Object.keys(rjmcState.kPosteriorSamples));
+        console.log('[RJMCMC] Sample counts for each K:', Object.keys(rjmcState.kPosteriorSamples).map(k => `${k}: ${rjmcState.kPosteriorSamples[k].length}`));
         
         // Create datasets array
         const datasets = [];
@@ -1858,6 +1863,16 @@ function updateMixtureFit() {
             if (samples.length > 0) {
                 console.log(`[RJMCMC] K=${k} first sample means:`, samples[0].jump.mu);
                 console.log(`[RJMCMC] K=${k} second sample means:`, samples[1] ? samples[1].jump.mu : 'N/A');
+                
+                // Calculate and log the average means for this K
+                const avgMeans = [];
+                const numComponents = samples[0].jump.mu.length;
+                for (let comp = 0; comp < numComponents; comp++) {
+                    const compMeans = samples.map(sample => sample.jump.mu[comp]);
+                    const avgMean = compMeans.reduce((sum, mean) => sum + mean, 0) / compMeans.length;
+                    avgMeans.push(avgMean);
+                }
+                console.log(`[RJMCMC] K=${k} average means across all samples:`, avgMeans);
             }
             
             if (samples.length > 0) {
@@ -2011,7 +2026,7 @@ function updateMixtureFit() {
                 plugins: {
                     title: {
                         display: true,
-                        text: 'Mixture Model Fit'
+                        text: `Mixture Model Fit (K=${topKValues[0] || 'N/A'})`
                     },
                     legend: {
                         display: true,
@@ -2027,6 +2042,8 @@ function updateMixtureFit() {
         });
         
         console.log('[RJMCMC] Mixture fit chart created successfully:', mixtureFitChart);
+        console.log('[RJMCMC] Chart created at:', new Date().toISOString());
+        console.log('[RJMCMC] Chart title should show K=', topKValues[0]);
         
         // Force a resize to ensure the chart renders properly
         if (mixtureFitChart && typeof mixtureFitChart.resize === 'function') {
@@ -2111,6 +2128,14 @@ function createSimpleTestPlot() {
 function showRawDataVisualization() {
     console.log('[RJMCMC] showRawDataVisualization called');
     console.log('[RJMCMC] currentData:', currentData);
+    console.log('[RJMCMC] rawDataChart element:', document.getElementById('rawDataChart'));
+    
+    // Ensure raw data container is visible
+    const rawDataContainer = document.querySelector('.raw-data-container');
+    if (rawDataContainer) {
+        rawDataContainer.style.display = 'block';
+        console.log('[RJMCMC] Raw data container made visible');
+    }
     
     // Test if Plotly is loaded
     if (typeof Plotly === 'undefined') {
@@ -2204,7 +2229,8 @@ function showRawDataVisualization() {
 
 // Switch between mixture fit tabs
 function switchMixtureTab(tabName) {
-    console.log(`[RJMCMC] Switching to tab: ${tabName}`);
+    console.log(`[RJMCMC] ===== SWITCHING TO TAB: ${tabName} =====`);
+    console.log(`[RJMCMC] Current rjmcState.currentTab before: ${rjmcState.currentTab}`);
     
     // Update active tab button
     document.querySelectorAll('.tab').forEach(btn => btn.classList.remove('active'));
@@ -2229,8 +2255,16 @@ function switchMixtureTab(tabName) {
     }
     
     // Update the mixture fit visualization
+    const k = parseInt(tabName.replace('top', ''));
     console.log(`[RJMCMC] Calling updateMixtureFit with currentTab: ${rjmcState.currentTab}`);
+    console.log(`[RJMCMC] Available samples for K=${k}:`, rjmcState.kPosteriorSamples[k] ? rjmcState.kPosteriorSamples[k].length : 0);
+    if (rjmcState.kPosteriorSamples[k] && rjmcState.kPosteriorSamples[k].length > 0) {
+        console.log(`[RJMCMC] First sample for K=${k}:`, rjmcState.kPosteriorSamples[k][0]);
+    }
+    
+    console.log(`[RJMCMC] About to call updateMixtureFit with currentTab: ${rjmcState.currentTab}`);
     updateMixtureFit();
+    console.log(`[RJMCMC] ===== TAB SWITCH COMPLETE =====`);
 }
 
 // Update mixture fit tabs based on available K values
@@ -2699,6 +2733,7 @@ function stopRJMCMCAnalysis() {
         updateLogPosteriorPlot();
         updateComponentDistribution();
         updateMixtureFit();
+        showRawDataVisualization();
     }
 }
 
@@ -2863,6 +2898,9 @@ function resetAnalysisState() {
     updateLogPosteriorPlot();
     updateComponentDistribution();
     updateMixtureFit();
+    
+    // Ensure raw data visualization is shown
+    showRawDataVisualization();
     
     console.log('[RJMCMC] Analysis state reset complete');
 }

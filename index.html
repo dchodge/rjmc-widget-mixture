@@ -667,12 +667,6 @@
                     </div>
                 </div>
 
-                <div class="control-group">
-                    <h3>Analysis</h3>
-                    <button type="button" class="btn" id="startBtn" onclick="startRJMCMCAnalysis()">Start Analysis</button>
-                    <button type="button" class="btn btn-secondary" id="stopBtn" onclick="stopRJMCMCAnalysis()" disabled>Stop Analysis</button>
-                    <div class="status" id="status" style="display: none;"></div>
-                </div>
 
                 <div class="control-group">
                     <h3>Display Options</h3>
@@ -708,17 +702,31 @@
                 <div class="dynamic-fit-section">
                     <h2>Dynamic Fit Analysis</h2>
                     
-                    <!-- Progress Bar -->
-                    <div id="progressContainer" style="display: none; margin-bottom: 20px; padding: 15px; background-color: #f8f9fa; border-radius: 8px; border: 1px solid #e9ecef;">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                            <span id="progressLabel" style="font-weight: 600; color: #495057;">Progress:</span>
-                            <span id="progressPercent" style="font-weight: 600; color: #28a745;">0%</span>
+                    <!-- Analysis Controls and Progress Bar -->
+                    <div style="margin-bottom: 20px; padding: 20px; background-color: #f8f9fa; border-radius: 8px; border: 1px solid #e9ecef;">
+                        <h3 style="margin-bottom: 15px; color: #495057; font-size: 1.1em;">Analysis Controls</h3>
+                        
+                        <!-- Analysis Buttons -->
+                        <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                            <button type="button" class="btn" id="startBtn" onclick="startRJMCMCAnalysis()" style="flex: 1;">Start Analysis</button>
+                            <button type="button" class="btn btn-secondary" id="stopBtn" onclick="stopRJMCMCAnalysis()" disabled style="flex: 1;">Stop Analysis</button>
                         </div>
-                        <div style="width: 100%; height: 20px; background-color: #e9ecef; border-radius: 10px; overflow: hidden;">
-                            <div id="progressBar" style="height: 100%; background: linear-gradient(90deg, #4CAF50, #8BC34A); width: 0%; transition: width 0.3s ease;"></div>
-                        </div>
-                        <div id="progressDetails" style="font-size: 0.85em; color: #6c757d; margin-top: 8px; text-align: center;">
-                            <span id="currentIteration">0</span> / <span id="totalIterations">0</span> iterations
+                        
+                        <!-- Status -->
+                        <div class="status" id="status" style="display: none; margin-bottom: 15px;"></div>
+                        
+                        <!-- Progress Bar -->
+                        <div id="progressContainer" style="display: none;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                <span id="progressLabel" style="font-weight: 600; color: #495057;">Progress:</span>
+                                <span id="progressPercent" style="font-weight: 600; color: #28a745;">0%</span>
+                            </div>
+                            <div style="width: 100%; height: 20px; background-color: #e9ecef; border-radius: 10px; overflow: hidden;">
+                                <div id="progressBar" style="height: 100%; background: linear-gradient(90deg, #4CAF50, #8BC34A); width: 0%; transition: width 0.3s ease;"></div>
+                            </div>
+                            <div id="progressDetails" style="font-size: 0.85em; color: #6c757d; margin-top: 8px; text-align: center;">
+                                <span id="currentIteration">0</span> / <span id="totalIterations">0</span> iterations
+                            </div>
                         </div>
                     </div>
                     
