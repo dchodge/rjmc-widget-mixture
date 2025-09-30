@@ -353,6 +353,7 @@ function runRJMCMCStep() {
         chain.logPostHistory.push(chain.logPosterior);
         
         // Update kProbabilities immediately for accurate tab ordering
+        // This is just for tracking, the real calculation happens in updateComponentDistribution
         rjmcState.kProbabilities[chain.currentK] = (rjmcState.kProbabilities[chain.currentK] || 0) + 1;
         
         // Limit history length to prevent memory issues
@@ -403,7 +404,10 @@ function runRJMCMCStep() {
     }
     
     // Store all posterior samples for each K from all chains (after burn-in)
-    if (rjmcState.iterations > 100) { // Simple burn-in check
+    const burninInput = document.getElementById('burnin');
+    const burnin = burninInput ? parseInt(burninInput.value) || 100 : 100;
+    
+    if (rjmcState.iterations > burnin) {
         rjmcState.chains.forEach(chain => {
             const k = chain.currentK;
             if (!rjmcState.kPosteriorSamples[k]) {
@@ -414,6 +418,13 @@ function runRJMCMCStep() {
                 logPosterior: chain.logPosterior
             });
         });
+        
+        // Debug logging
+        if (rjmcState.iterations % 1000 === 0) {
+            console.log('[RJMCMC] kPosteriorSamples status:', Object.keys(rjmcState.kPosteriorSamples).map(k => 
+                `${k}: ${rjmcState.kPosteriorSamples[k].length} samples`
+            ));
+        }
     }
 }
 
@@ -447,6 +458,8 @@ async function runRJMCMCAnalysis(settings = {}) {
         
         // Show initial progress
         updateProgress(0, finalSettings.iterations, 'Initializing RJMCMC...');
+        showProgressBar();
+        updateProgressBar(0, finalSettings.iterations);
         
         // Run RJMCMC iterations
         console.log(`[RJMCMC] Starting ${finalSettings.iterations} iterations`);
@@ -466,6 +479,7 @@ async function runRJMCMCAnalysis(settings = {}) {
             // Update progress and visualizations (optimized frequency)
             if (i % finalSettings.updateInterval === 0 || i < 100) {
                 updateProgress(i + 1, finalSettings.iterations, `Running RJMCMC... K=${rjmcState.currentK}`);
+                updateProgressBar(i + 1, finalSettings.iterations);
                 
                 // Update visualizations with fixed frequency for better performance
                 const updateFreq = i < 100 ? 10 : 100; // Every 10 iterations for first 100, then every 100
@@ -487,12 +501,19 @@ async function runRJMCMCAnalysis(settings = {}) {
             if (i % 500 === 0 && i > 0) {
                 updateMixtureFit();
                 updateComponentDistribution();
+                
+                // Show posterior distribution container when we have data
+                const posteriorContainer = document.getElementById('posteriorDistContainer');
+                if (posteriorContainer && rjmcState.kHistory.length > 0) {
+                    posteriorContainer.style.display = 'block';
+                }
             }
         }
         
         if (isAnalysisRunning) {
             console.log(`[RJMCMC] Analysis completed successfully after ${finalSettings.iterations} iterations`);
             updateProgress(finalSettings.iterations, finalSettings.iterations, 'Analysis complete!');
+            updateProgressBar(finalSettings.iterations, finalSettings.iterations);
             
             // Update convergence diagnostics one final time
             console.log('[RJMCMC] Final convergence diagnostics update');
@@ -508,8 +529,21 @@ async function runRJMCMCAnalysis(settings = {}) {
         
         // Update mixture tabs to show available K values
         updateMixtureTabs();
+        
+        // Force show posterior distribution container
+        const posteriorContainer = document.getElementById('posteriorDistContainer');
+        if (posteriorContainer) {
+            posteriorContainer.style.display = 'block';
+            console.log('[RJMCMC] Posterior distribution container made visible');
+        }
             
         updateFinalResults();
+        
+        // Hide progress bar after completion
+        setTimeout(() => {
+            hideProgressBar();
+        }, 2000); // Hide after 2 seconds to show completion
+        
         } else {
             console.log(`[RJMCMC] Analysis was stopped early. isAnalysisRunning: ${isAnalysisRunning}`);
         }
@@ -518,6 +552,7 @@ async function runRJMCMCAnalysis(settings = {}) {
         console.error('[RJMCMC] Analysis failed:', error);
         console.error('[RJMCMC] Error stack:', error.stack);
         updateProgress(0, 0, 'Analysis failed: ' + error.message);
+        hideProgressBar(); // Hide progress bar on error
         throw error;
         
     } finally {
@@ -845,7 +880,6 @@ function updateLogPosteriorPlot() {
 // Update component distribution
 function updateComponentDistribution() {
     console.log('[RJMCMC] updateComponentDistribution called');
-    console.log('[RJMCMC] kProbabilities:', rjmcState.kProbabilities);
     
     const chartElement = document.getElementById('componentDistChart');
     if (!chartElement) {
@@ -857,17 +891,36 @@ function updateComponentDistribution() {
     
     if (componentDistChart) {
         componentDistChart.destroy();
+        componentDistChart = null;
     }
     
-    if (!rjmcState.kProbabilities || Object.keys(rjmcState.kProbabilities).length === 0) {
-        console.log('[RJMCMC] No kProbabilities available, creating empty chart');
-        
+    // Collect all K values from all chains
+    let allKValues = [];
+    
+    if (rjmcState.chains && rjmcState.chains.length > 0) {
+        console.log('[RJMCMC] Collecting K values from all chains');
+        rjmcState.chains.forEach((chain, chainIndex) => {
+            if (chain.kHistory && chain.kHistory.length > 0) {
+                allKValues = allKValues.concat(chain.kHistory);
+                console.log(`[RJMCMC] Chain ${chainIndex + 1}: ${chain.kHistory.length} K values`);
+            }
+        });
+    } else if (rjmcState.kHistory && rjmcState.kHistory.length > 0) {
+        console.log('[RJMCMC] Using single chain kHistory');
+        allKValues = rjmcState.kHistory;
+    }
+    
+    console.log('[RJMCMC] Total K values collected:', allKValues.length);
+    console.log('[RJMCMC] K values sample:', allKValues.slice(0, 10));
+    
+    if (allKValues.length === 0) {
+        console.log('[RJMCMC] No K values available, creating empty chart');
         componentDistChart = new Chart(ctx, {
             type: 'bar',
             data: {
                 labels: ['No data yet'],
                 datasets: [{
-                    label: 'Probability (%)',
+                    label: 'Frequency',
                     data: [0],
                     backgroundColor: 'rgba(0,0,0,0.1)',
                     borderColor: '#000000',
@@ -883,7 +936,7 @@ function updateComponentDistribution() {
                         max: 100,
                         title: {
                             display: true,
-                            text: 'Probability (%)'
+                            text: 'Frequency (%)'
                         }
                     },
                     x: {
@@ -904,58 +957,39 @@ function updateComponentDistribution() {
         return;
     }
     
+    // Count frequencies of each K value
+    const kCounts = {};
+    allKValues.forEach(k => {
+        kCounts[k] = (kCounts[k] || 0) + 1;
+    });
+    
+    console.log('[RJMCMC] K counts:', kCounts);
+    
+    // Get sorted K values
+    const kValues = Object.keys(kCounts).map(Number).sort((a, b) => a - b);
+    const totalCount = allKValues.length;
+    const frequencies = kValues.map(k => (kCounts[k] / totalCount) * 100);
+    
+    console.log('[RJMCMC] Creating histogram with:', {
+        kValues: kValues,
+        frequencies: frequencies,
+        totalCount: totalCount
+    });
+    
+    // Check if Chart.js is available
+    if (typeof Chart === 'undefined') {
+        console.error('[RJMCMC] Chart.js is not loaded!');
+        return;
+    }
+    
     try {
-        console.log('[RJMCMC] updateComponentDistribution: Updating component distribution chart');
-        console.log('[RJMCMC] kProbabilities:', rjmcState.kProbabilities);
-        console.log('[RJMCMC] iterations:', rjmcState.iterations);
-        
-        const chartElement = document.getElementById('componentDistChart');
-        if (!chartElement) {
-            console.error('[RJMCMC] componentDistChart element not found');
-            return;
-        }
-        
-        console.log('[RJMCMC] Chart element found:', chartElement);
-        console.log('[RJMCMC] Chart element dimensions:', {
-            width: chartElement.width,
-            height: chartElement.height,
-            clientWidth: chartElement.clientWidth,
-            clientHeight: chartElement.clientHeight
-        });
-        
-        const ctx = chartElement.getContext('2d');
-        
-        const kValues = Object.keys(rjmcState.kProbabilities).map(Number).sort((a, b) => a - b);
-        console.log('[RJMCMC] kValues:', kValues);
-        
-        // Normalize by total samples across all chains (iterations * numChains)
-        const totalSamples = rjmcState.iterations * rjmcState.numChains;
-        console.log('[RJMCMC] totalSamples:', totalSamples);
-        
-        const probabilities = kValues.map(k => (rjmcState.kProbabilities[k] / totalSamples) * 100);
-        console.log('[RJMCMC] probabilities:', probabilities);
-        
-        // If chart exists, update its data instead of recreating
-        if (componentDistChart) {
-            console.log('[RJMCMC] Updating existing chart data');
-            componentDistChart.data.labels = kValues.map(k => `K=${k}`);
-            componentDistChart.data.datasets[0].data = probabilities;
-            componentDistChart.options.scales.y.max = Math.max(...probabilities) * 1.1;
-            componentDistChart.update('active');
-            console.log('[RJMCMC] Chart updated successfully');
-        } else {
-            console.log('[RJMCMC] Creating new chart with data:', {
-                labels: kValues.map(k => `K=${k}`),
-                data: probabilities
-            });
-        
         componentDistChart = new Chart(ctx, {
             type: 'bar',
             data: {
                 labels: kValues.map(k => `K=${k}`),
                 datasets: [{
-                    label: 'Probability (%)',
-                    data: probabilities,
+                    label: 'Frequency (%)',
+                    data: frequencies,
                     backgroundColor: 'rgba(0,0,0,0.3)',
                     borderColor: '#000000',
                     borderWidth: 1
@@ -967,10 +1001,10 @@ function updateComponentDistribution() {
                 scales: {
                     y: {
                         beginAtZero: true,
-                        max: Math.max(...probabilities) * 1.1, // Dynamic max with 10% padding
+                        max: Math.max(...frequencies) * 1.1,
                         title: {
                             display: true,
-                            text: 'Probability (%)'
+                            text: 'Frequency (%)'
                         }
                     },
                     x: {
@@ -989,23 +1023,16 @@ function updateComponentDistribution() {
             }
         });
         
-            console.log('[RJMCMC] Chart created successfully');
-        }
-        
-        // Calculate posterior means
-        calculatePosteriorMeans();
+        console.log('[RJMCMC] Chart created successfully');
         
         // Show the posterior distribution container
         const container = document.getElementById('posteriorDistContainer');
         if (container) {
             container.style.display = 'block';
-            console.log('[RJMCMC] Posterior distribution container made visible');
-        } else {
-            console.error('[RJMCMC] posteriorDistContainer not found');
         }
         
     } catch (error) {
-        console.error('[RJMCMC] Failed to update component distribution:', error);
+        console.error('[RJMCMC] Error creating chart:', error);
     }
 }
 
@@ -1673,6 +1700,8 @@ function cleanupOldData() {
 
 // Update mixture fit
 function updateMixtureFit() {
+    console.log('[RJMCMC] updateMixtureFit called');
+    
     if (!currentData) {
         console.log('[RJMCMC] No current data for mixture fit');
         return;
@@ -1684,10 +1713,16 @@ function updateMixtureFit() {
         return;
     }
     
+    console.log('[RJMCMC] Canvas found:', canvas);
+    console.log('[RJMCMC] kPosteriorSamples:', rjmcState.kPosteriorSamples);
+    console.log('[RJMCMC] currentTab:', rjmcState.currentTab);
+    
     const ctx = canvas.getContext('2d');
     
     if (mixtureFitChart) {
+        console.log('[RJMCMC] Destroying existing mixture fit chart');
         mixtureFitChart.destroy();
+        mixtureFitChart = null;
     }
     
     try {
@@ -2525,6 +2560,9 @@ function stopRJMCMCAnalysis() {
         status.className = 'status error';
         status.textContent = 'Analysis stopped by user';
         status.style.display = 'block';
+        
+        // Hide progress bar
+        hideProgressBar();
     }
 }
 
@@ -2554,6 +2592,13 @@ async function initSimpleApp() {
         
         // Initialize component distribution
         updateComponentDistribution();
+        
+        // Show posterior distribution container
+        const posteriorContainer = document.getElementById('posteriorDistContainer');
+        if (posteriorContainer) {
+            posteriorContainer.style.display = 'block';
+            console.log('[RJMCMC] Posterior distribution container made visible during init');
+        }
         
         
         // Show results container
@@ -2766,10 +2811,108 @@ function downloadPosteriors() {
     window.URL.revokeObjectURL(url);
 }
 
+// Progress bar functions
+function showProgressBar() {
+    const progressContainer = document.getElementById('progressContainer');
+    if (progressContainer) {
+        progressContainer.style.display = 'block';
+    }
+}
+
+function hideProgressBar() {
+    const progressContainer = document.getElementById('progressContainer');
+    if (progressContainer) {
+        progressContainer.style.display = 'none';
+    }
+}
+
+function updateProgressBar(currentIteration, totalIterations) {
+    const progressBar = document.getElementById('progressBar');
+    const progressPercent = document.getElementById('progressPercent');
+    const currentIterationSpan = document.getElementById('currentIteration');
+    const totalIterationsSpan = document.getElementById('totalIterations');
+    
+    if (progressBar && progressPercent && currentIterationSpan && totalIterationsSpan) {
+        const percentage = Math.min(100, Math.max(0, (currentIteration / totalIterations) * 100));
+        
+        progressBar.style.width = percentage + '%';
+        progressPercent.textContent = Math.round(percentage) + '%';
+        currentIterationSpan.textContent = currentIteration.toLocaleString();
+        totalIterationsSpan.textContent = totalIterations.toLocaleString();
+    }
+}
+
+// Test function for posterior distribution
+function testPosteriorDistribution() {
+    console.log('[RJMCMC] Testing posterior distribution...');
+    
+    // Create test data for all chains
+    console.log('[RJMCMC] Creating test chains data');
+    rjmcState.chains = [
+        {
+            kHistory: [2, 2, 2, 3, 3, 2, 3, 3, 4, 3, 2, 3, 4, 4, 3, 2, 3, 2, 3, 3, 2, 2, 3, 4, 3, 2, 3, 3, 4, 3]
+        },
+        {
+            kHistory: [2, 3, 3, 3, 2, 3, 4, 3, 3, 2, 3, 4, 3, 2, 3, 3, 4, 3, 2, 3, 3, 2, 3, 4, 3, 2, 3, 3, 4, 3]
+        },
+        {
+            kHistory: [2, 2, 3, 2, 3, 3, 4, 3, 2, 3, 4, 4, 3, 2, 3, 3, 2, 3, 4, 3, 2, 3, 3, 4, 3, 2, 3, 3, 4, 3]
+        },
+        {
+            kHistory: [3, 3, 2, 3, 4, 3, 2, 3, 3, 4, 3, 2, 3, 3, 2, 3, 4, 3, 3, 2, 3, 4, 3, 2, 3, 3, 4, 3, 2, 3]
+        }
+    ];
+    
+    console.log('[RJMCMC] Test chains created:', rjmcState.chains.length);
+    updateComponentDistribution();
+}
+
+// Test function for mixture fit
+function testMixtureFit() {
+    console.log('[RJMCMC] Testing mixture fit...');
+    
+    // Create test data
+    if (!currentData) {
+        console.log('[RJMCMC] Creating test data for mixture fit');
+        currentData = {
+            obs: Array.from({length: 100}, () => Math.random() * 10 - 5)
+        };
+    }
+    
+    // Create test posterior samples
+    if (!rjmcState.kPosteriorSamples || Object.keys(rjmcState.kPosteriorSamples).length === 0) {
+        console.log('[RJMCMC] Creating test posterior samples');
+        rjmcState.kPosteriorSamples = {
+            '2': Array.from({length: 50}, () => ({
+                jump: {
+                    p: [0.5, 0.5],
+                    mu: [1, 4],
+                    sigma: [1, 1]
+                },
+                logPosterior: -100
+            })),
+            '3': Array.from({length: 30}, () => ({
+                jump: {
+                    p: [0.33, 0.33, 0.34],
+                    mu: [0, 2, 5],
+                    sigma: [1, 1, 1]
+                },
+                logPosterior: -95
+            }))
+        };
+        rjmcState.currentTab = 'top2';
+    }
+    
+    console.log('[RJMCMC] Test data created, calling updateMixtureFit');
+    updateMixtureFit();
+}
+
 // Make functions globally available
 window.initSimpleApp = initSimpleApp;
 window.startRJMCMCAnalysis = startRJMCMCAnalysis;
 window.showRawDataVisualization = showRawDataVisualization;
+window.testPosteriorDistribution = testPosteriorDistribution;
+window.testMixtureFit = testMixtureFit;
 window.testPlotly = createSimpleTestPlot;
 window.testComponentPlot = testComponentTracePlot;
 window.loadDemoData = loadDemoData;

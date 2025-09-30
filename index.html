@@ -672,6 +672,20 @@
                     <button type="button" class="btn" id="startBtn" onclick="startRJMCMCAnalysis()">Start Analysis</button>
                     <button type="button" class="btn btn-secondary" id="stopBtn" onclick="stopRJMCMCAnalysis()" disabled>Stop Analysis</button>
                     <div class="status" id="status" style="display: none;"></div>
+                    
+                    <!-- Progress Bar -->
+                    <div id="progressContainer" style="display: none; margin-top: 15px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                            <span id="progressLabel">Progress:</span>
+                            <span id="progressPercent">0%</span>
+                        </div>
+                        <div style="width: 100%; height: 20px; background-color: #f0f0f0; border-radius: 10px; overflow: hidden;">
+                            <div id="progressBar" style="height: 100%; background: linear-gradient(90deg, #4CAF50, #8BC34A); width: 0%; transition: width 0.3s ease;"></div>
+                        </div>
+                        <div id="progressDetails" style="font-size: 0.8em; color: #666; margin-top: 5px;">
+                            <span id="currentIteration">0</span> / <span id="totalIterations">0</span> iterations
+                        </div>
+                    </div>
                 </div>
 
                 <div class="control-group">
@@ -689,6 +703,13 @@
                         </label>
                     </div>
                     <button type="button" class="btn btn-secondary" onclick="updateParameterPlots()">Update Parameter Plots</button>
+                    
+                    <!-- Debug buttons -->
+                    <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #eee;">
+                        <h4 style="margin-bottom: 10px; font-size: 0.9em; color: #666;">Debug Tools</h4>
+                        <button type="button" class="btn btn-secondary" onclick="testPosteriorDistribution()" style="margin-bottom: 5px; font-size: 0.8em;">Test Posterior Distribution</button>
+                        <button type="button" class="btn btn-secondary" onclick="testMixtureFit()" style="margin-bottom: 5px; font-size: 0.8em;">Test Mixture Fit</button>
+                    </div>
                 </div>
             </div>
 
