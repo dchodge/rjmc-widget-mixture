@@ -21,13 +21,15 @@ The application uses **Reversible Jump MCMC** to explore different numbers of mi
 ### Mathematical Model
 
 The target mixture distribution is defined as:
+
 ```
 p(z) = Σₖ₌₁ᴷ pₖ · N(z | μₖ, σₖ²)
 ```
 
 Where:
+
 - N(z | μₖ, σₖ²) is the normal density for the k-th component
-- pₖ represents the mixing proportion of the k-th component  
+- pₖ represents the mixing proportion of the k-th component
 - K is the number of components (inferred dynamically)
 - μₖ are the component means
 - σₖ are the component standard deviations
@@ -40,30 +42,11 @@ Where:
 4. **Run Analysis**: Click "Start Analysis" to begin RJMCMC sampling
 5. **View Results**: Explore posterior distributions and convergence diagnostics
 
-## 📁 Project Structure
-
-```
-rjmc_widget/
-├── index.html              # Main HTML interface
-├── rjmc_simple.js          # Core RJMCMC implementation
-├── rjmc_logo.png           # RJMC package logo
-├── sampled data for testing/ # Example CSV datasets
-└── .github/workflows/      # GitHub Actions deployment
-```
-
 ## 🔗 Related Links
 
 - **[RJMC Package](https://github.com/dchodge/rjmc)** - Source R package
 - **[Detailed Vignette](https://dchodge.github.io/rjmc/articles/Ex1_mixture.html)** - Technical documentation
 - **[RJMC Documentation](https://dchodge.github.io/rjmc/)** - Package documentation
-
-## 🚀 Deployment
-
-This widget is automatically deployed to GitHub Pages using GitHub Actions. The workflow:
-
-1. Triggers on pushes to main/master branches
-2. Builds the static site
-3. Deploys to GitHub Pages
 
 ## 📄 License
 
@@ -75,5 +58,5 @@ Contributions are welcome! Please feel free to submit issues or pull requests.
 
 ---
 
-**Developed by David Hodgson**  
-*Part of the RJMC package for Reversible Jump MCMC analysis*# rjmc-widget-mixture
+**Developed by David Hodgson**
+*Part of the RJMC package for Reversible Jump MCMC analysis*

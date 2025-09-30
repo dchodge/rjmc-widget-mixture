@@ -1,0 +1,760 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dynamic Mixture Model Analysis</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.plot.ly/plotly-2.26.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Avenir:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Avenir', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #ffffff;
+            color: #000000;
+            line-height: 1.6;
+            font-weight: 400;
+        }
+
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            font-weight: 600;
+            margin-bottom: 20px;
+            color: #000000;
+            line-height: 1.2;
+        }
+
+        .header p {
+            font-size: 1.2em;
+            font-weight: 400;
+            opacity: 0.8;
+            margin-bottom: 10px;
+        }
+
+        .header .subtitle {
+            font-size: 0.9em;
+            font-weight: 300;
+            opacity: 0.6;
+            margin-top: 8px;
+            font-style: italic;
+        }
+
+        .logo-container {
+            text-align: center;
+            margin: 20px 0;
+        }
+
+        .rjmc-logo {
+            height: 180px;
+            width: auto;
+            transition: transform 0.2s ease;
+            border-radius: 8px;
+        }
+
+        .rjmc-logo:hover {
+            transform: scale(1.05);
+        }
+
+        /* Info dropdown styles */
+        .info-dropdown {
+            margin-top: 20px;
+            max-width: 600px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        .info-toggle {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            padding: 12px 16px;
+            cursor: pointer;
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 0.9em;
+            transition: all 0.2s ease;
+        }
+
+        .info-toggle:hover {
+            background: #e9ecef;
+        }
+
+        .info-icon {
+            font-size: 1.2em;
+            margin-right: 8px;
+        }
+
+        .info-arrow {
+            transition: transform 0.2s ease;
+        }
+
+        .info-toggle.active .info-arrow {
+            transform: rotate(180deg);
+        }
+
+        .info-content {
+            display: none;
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-top: none;
+            border-radius: 0 0 8px 8px;
+            padding: 20px;
+            margin-top: -1px;
+            font-size: 0.9em;
+            line-height: 1.5;
+        }
+
+        .info-content h4 {
+            margin: 15px 0 8px 0;
+            font-size: 1.1em;
+            font-weight: 600;
+            color: #000000;
+        }
+
+        .info-content p {
+            margin: 8px 0;
+            color: #333333;
+        }
+
+        .main-content {
+            display: grid;
+            grid-template-columns: 350px 1fr;
+            gap: 30px;
+            align-items: start;
+        }
+
+        .control-panel {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 12px;
+            padding: 25px;
+            position: sticky;
+            top: 20px;
+        }
+
+        .control-group {
+            margin-bottom: 25px;
+        }
+
+        .control-group h3 {
+            font-size: 1.2em;
+            font-weight: 600;
+            margin-bottom: 15px;
+            color: #000000;
+            border-bottom: 2px solid #000000;
+            padding-bottom: 5px;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            font-weight: 500;
+            margin-bottom: 5px;
+            font-size: 0.9em;
+            color: #333333;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 0.9em;
+            transition: border-color 0.2s ease;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: #000000;
+        }
+
+        .file-upload {
+            border: 1px dashed #000000;
+            padding: 30px 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            background: #ffffff;
+        }
+
+        .file-upload:hover {
+            background: #f8f8f8;
+        }
+
+        .file-upload.dragover {
+            background: #f0f0f0;
+        }
+
+        .btn {
+            background: #000000;
+            color: #ffffff;
+            border: 1px solid #000000;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9em;
+            font-weight: 500;
+            transition: all 0.2s ease;
+            width: 100%;
+            margin-bottom: 10px;
+        }
+
+        .btn:hover {
+            background: #333333;
+            border-color: #333333;
+        }
+
+        .btn:disabled {
+            background: #cccccc;
+            border-color: #cccccc;
+            cursor: not-allowed;
+        }
+
+        .btn-secondary {
+            background: #ffffff;
+            color: #000000;
+            border: 1px solid #000000;
+        }
+
+        .btn-secondary:hover {
+            background: #f8f9fa;
+        }
+
+        .status {
+            margin-top: 15px;
+            padding: 10px;
+            border-radius: 6px;
+            font-size: 0.9em;
+            text-align: center;
+        }
+
+        .status.running {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .status.completed {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .visualization-panel {
+            background: #ffffff;
+            border: 1px solid #e9ecef;
+            border-radius: 12px;
+            padding: 25px;
+        }
+
+        .chart-container {
+            margin-bottom: 30px;
+        }
+
+        .chart-container h3 {
+            font-size: 1.3em;
+            font-weight: 600;
+            margin-bottom: 15px;
+            color: #000000;
+            text-align: center;
+        }
+
+        .chart-wrapper {
+            background: #ffffff;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+
+        .raw-data-container {
+            height: 300px;
+            margin-bottom: 20px;
+        }
+
+        .trace-chart {
+            height: 250px;
+            margin-bottom: 20px;
+        }
+
+        #componentTraceChart {
+            height: 300px;
+        }
+
+        #logPosteriorChart {
+            height: 250px;
+        }
+
+        .convergence-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .convergence-item {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            padding: 15px;
+            text-align: center;
+        }
+
+        .convergence-item h4 {
+            font-size: 0.9em;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #000000;
+        }
+
+        .convergence-item .value {
+            font-size: 1.5em;
+            font-weight: 700;
+            color: #000000;
+        }
+
+        .convergence-item .label {
+            font-size: 0.8em;
+            color: #666666;
+            margin-top: 5px;
+        }
+
+        .tabs {
+            display: flex;
+            border-bottom: 2px solid #e9ecef;
+            margin-bottom: 20px;
+            overflow-x: auto;
+        }
+
+        .tab {
+            padding: 12px 20px;
+            cursor: pointer;
+            border: none;
+            background: none;
+            font-size: 0.9em;
+            font-weight: 500;
+            color: #666666;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s ease;
+            white-space: nowrap;
+        }
+
+        .tab.active {
+            color: #000000;
+            border-bottom-color: #000000;
+        }
+
+        .tab:hover {
+            color: #000000;
+            background: #f8f9fa;
+        }
+
+        .tab-content {
+            display: none;
+            max-height: 500px;
+            height: 400px;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        #mixtureFitChart {
+            max-height: 350px;
+            height: 350px !important;
+        }
+
+        .tab-controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .download-btn {
+            background: #28a745;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.8em;
+            transition: background 0.2s ease;
+        }
+
+        .download-btn:hover {
+            background: #218838;
+        }
+
+        .parameter-trace-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .parameter-trace-grid.scrollable {
+            display: flex;
+            overflow-x: auto;
+            gap: 20px;
+            padding-bottom: 10px;
+        }
+
+        .parameter-trace-grid.scrollable > div {
+            flex: 0 0 300px;
+        }
+
+        .parameter-trace-item {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            padding: 15px;
+        }
+
+        .parameter-trace-item h4 {
+            font-size: 1em;
+            font-weight: 600;
+            margin-bottom: 10px;
+            color: #000000;
+            text-align: center;
+        }
+
+        .parameter-trace-chart {
+            height: 200px;
+        }
+
+        .posterior-dist-container {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+
+        .posterior-dist-chart {
+            height: 300px;
+        }
+
+        #posteriorDistContainer {
+            display: none;
+        }
+
+        .info-content a {
+            color: #000000;
+            text-decoration: underline;
+        }
+
+        .info-content a:hover {
+            color: #333333;
+        }
+
+        @media (max-width: 1200px) {
+            .main-content {
+                grid-template-columns: 1fr;
+                gap: 20px;
+            }
+            
+            .control-panel {
+                position: static;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 20px 10px;
+            }
+            
+            .header h1 {
+                font-size: 2em;
+            }
+            
+            .convergence-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .parameter-trace-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Dynamically Determine the Number of Components in a Mixture Model</h1>
+            <p>Discover hidden patterns in your data with <strong>Reversible Jump MCMC</strong> - automatically detect how many mixture components exist without guessing!</p>
+            <p class="subtitle">Upload your data or explore with our interactive examples • <a href="https://dchodge.github.io/rjmc/articles/Ex1_mixture.html" target="_blank" rel="noopener noreferrer">View detailed vignette</a></p>
+            
+            <div class="logo-container">
+                <a href="https://github.com/dchodge/rjmc" target="_blank" rel="noopener noreferrer">
+                    <img src="rjmc_logo.png" alt="RJMC Package Logo" class="rjmc-logo">
+                </a>
+            </div>
+            
+            <!-- Info dropdown -->
+            <div class="info-dropdown">
+                <button class="info-toggle" onclick="toggleInfo()">
+                    <span class="info-icon">ℹ️</span>
+                    <span class="info-text">About Reversible Jump MCMC</span>
+                    <span class="info-arrow">▼</span>
+                </button>
+                <div class="info-content" id="infoContent">
+                    <p>This application uses <strong>Reversible Jump Markov Chain Monte Carlo (RJMCMC)</strong> to dynamically determine the number of components in a mixture model without requiring you to specify the number of components beforehand.</p>
+                    
+                    <h4>Mixture Distribution Model:</h4>
+                    <p>The target mixture distribution is defined as a combination of K Gaussian components:</p>
+                    <p><strong>Mathematical Representation:</strong></p>
+                    <p>p(z) = Σ<sub>k=1</sub><sup>K</sup> p<sub>k</sub> · N(z | μ<sub>k</sub>, σ<sub>k</sub><sup>2</sup>)</p>
+                    <p>where:</p>
+                    <p>• N(z | μ<sub>k</sub>, σ<sub>k</sub><sup>2</sup>) is the normal density for the k-th component</p>
+                    <p>• p<sub>k</sub> represents the mixing proportion of the k-th component</p>
+                    <p>• K is the number of components (inferred dynamically)</p>
+                    <p>• μ<sub>k</sub> are the component means</p>
+                    <p>• σ<sub>k</sub> are the component standard deviations</p>
+                    
+                    <h4>Likelihood Function:</h4>
+                    <p>L(data | K, {p<sub>k</sub>, μ<sub>k</sub>, σ<sub>k</sub>}) = Π<sub>i=1</sub><sup>N</sup> (Σ<sub>k=1</sub><sup>K</sup> p<sub>k</sub> · N(z<sub>i</sub> | μ<sub>k</sub>, σ<sub>k</sub><sup>2</sup>))</p>
+                    
+                    <h4>How RJMCMC Works:</h4>
+                    <p><strong>Model Selection:</strong> The algorithm explores different numbers of mixture components (K) during sampling</p>
+                    <p><strong>Reversible Jumps:</strong> It can add or remove components through "birth" and "death" moves</p>
+                    <p><strong>Bayesian Inference:</strong> Uses posterior probabilities to determine the most likely number of components</p>
+                    <p><strong>Parameter Estimation:</strong> Simultaneously estimates component means, standard deviations, and mixing proportions</p>
+                    
+                    <h4>Key Features:</h4>
+                    <p>Automatic component number selection (no need to specify K beforehand)</p>
+                    <p>Real-time visualization of the sampling process</p>
+                    <p>Convergence diagnostics (ESS, Gelman-Rubin statistic)</p>
+                    <p>Posterior distribution of mixture components</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="main-content">
+            <div class="control-panel">
+                <div class="control-group">
+                    <h3>Data Input</h3>
+                    <div class="file-upload" id="fileUpload">
+                        <p>Drop CSV file here or click to browse</p>
+                        <input type="file" id="fileInput" accept=".csv" style="display: none;">
+                    </div>
+                    <div id="fileInfo" style="margin-top: 10px; font-size: 0.8em; opacity: 0.7;"></div>
+                    <button type="button" class="btn" onclick="loadSampleData()" style="margin-top: 10px; font-size: 0.9em;">
+                        Load 3-Component Example
+                    </button>
+                </div>
+
+                <div class="control-group">
+                    <h3>MCMC Parameters</h3>
+                    <div class="form-group">
+                        <label for="iterations">Iterations</label>
+                        <input type="number" id="iterations" value="20000" min="1000" max="50000">
+                    </div>
+                    <div class="form-group">
+                        <label for="burnin">Burn-in</label>
+                        <input type="number" id="burnin" value="10000" min="100" max="25000">
+                    </div>
+                    <div class="form-group">
+                        <label for="thin">Thinning</label>
+                        <input type="number" id="thin" value="5" min="1" max="50">
+                    </div>
+                </div>
+                
+                <div class="control-group">
+                    <h3>Prior Configuration</h3>
+                    <div class="form-group">
+                        <label for="poissonLambda">Poisson λ</label>
+                        <input type="number" id="poissonLambda" value="2.0" min="0.5" max="5.0" step="0.1">
+                    </div>
+                    <div class="form-group">
+                        <label for="regularizationStrength">Regularization</label>
+                        <input type="number" id="regularizationStrength" value="0.1" min="0.0" max="1.0" step="0.01">
+                    </div>
+                </div>
+
+                <div class="control-group">
+                    <h3>Parameter Ranges</h3>
+                    <div class="form-group">
+                        <label for="minMean">Min Mean</label>
+                        <input type="number" id="minMean" value="-10" step="0.1">
+                    </div>
+                    <div class="form-group">
+                        <label for="maxMean">Max Mean</label>
+                        <input type="number" id="maxMean" value="10" step="0.1">
+                    </div>
+                    <div class="form-group">
+                        <label for="minSigma">Min Sigma</label>
+                        <input type="number" id="minSigma" value="0.1" step="0.1">
+                    </div>
+                    <div class="form-group">
+                        <label for="maxSigma">Max Sigma</label>
+                        <input type="number" id="maxSigma" value="5" step="0.1">
+                    </div>
+                </div>
+
+                <div class="control-group">
+                    <h3>Analysis</h3>
+                    <button type="button" class="btn" id="startBtn" onclick="startAnalysis()">Start Analysis</button>
+                    <button type="button" class="btn btn-secondary" id="stopBtn" onclick="stopAnalysis()" disabled>Stop Analysis</button>
+                    <div class="status" id="status" style="display: none;"></div>
+                </div>
+
+                <div class="control-group">
+                    <h3>Display Options</h3>
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="showBurninToggle" checked>
+                            Show burn-in samples
+                        </label>
+                    </div>
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="dynamicParameterPlotsToggle">
+                            Dynamic parameter plots (slow)
+                        </label>
+                    </div>
+                    <button type="button" class="btn btn-secondary" onclick="updateParameterPlots()">Update Parameter Plots</button>
+                </div>
+            </div>
+
+            <div class="visualization-panel">
+                <div class="chart-container">
+                    <h3>Raw Data</h3>
+                    <div class="chart-wrapper">
+                        <div class="raw-data-container">
+                            <div id="rawDataChart"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="chart-container">
+                    <h3>Number of Components (K)</h3>
+                    <div class="chart-wrapper">
+                        <div class="trace-chart">
+                            <div id="componentTraceChart"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="chart-container">
+                    <h3>Log Posterior</h3>
+                    <div class="chart-wrapper">
+                        <div class="trace-chart">
+                            <div id="logPosteriorChart"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="chart-container">
+                    <h3>Convergence Diagnostics</h3>
+                    <div class="convergence-grid">
+                        <div class="convergence-item">
+                            <h4>Effective Sample Size (ESS)</h4>
+                            <div class="value" id="essValue">0</div>
+                            <div class="label">Higher is better</div>
+                        </div>
+                        <div class="convergence-item">
+                            <h4>Gelman-Rubin Statistic (R̂)</h4>
+                            <div class="value" id="rhatValue">1.000</div>
+                            <div class="label" id="rhatLabel">R̂ < 1.1 indicates convergence</div>
+                        </div>
+                        <div class="convergence-item">
+                            <h4>Acceptance Rate</h4>
+                            <div class="value" id="acceptanceValue">0%</div>
+                            <div class="label">Target: 20-50%</div>
+                        </div>
+                        <div class="convergence-item">
+                            <h4>Jump Acceptance Rate</h4>
+                            <div class="value" id="jumpAcceptanceValue">0%</div>
+                            <div class="label">Birth/death moves</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="chart-container">
+                    <h3>Parameter Trace Plots (Faceted by Component)</h3>
+                    <div class="parameter-trace-grid" id="parameterTraceGrid">
+                        <!-- Parameter trace plots will be generated here -->
+                    </div>
+                </div>
+
+                <div class="chart-container">
+                    <h3>Posterior Distribution of Components</h3>
+                    <div class="posterior-dist-container" id="posteriorDistContainer" style="display: none;">
+                        <div class="posterior-dist-chart">
+                            <div id="componentDistChart"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="chart-container">
+                    <h3>Mixture Model Fit</h3>
+                    <div class="tabs" id="mixtureTabs">
+                        <!-- Dynamic tabs will be created here -->
+                    </div>
+                    <div class="tab-content" id="mixtureFitContent">
+                        <div class="tab-controls">
+                            <span id="mixtureFitInfo">No data available</span>
+                            <button class="download-btn" onclick="downloadPosteriors()" style="display: none;">Download Posteriors</button>
+                        </div>
+                        <div class="chart-wrapper">
+                            <canvas id="mixtureFitChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="rjmc_simple.js"></script>
+    <script>
+        // Info dropdown functionality
+        function toggleInfo() {
+            const content = document.getElementById('infoContent');
+            const toggle = document.querySelector('.info-toggle');
+            
+            if (content.style.display === 'block') {
+                content.style.display = 'none';
+                toggle.classList.remove('active');
+            } else {
+                content.style.display = 'block';
+                toggle.classList.add('active');
+            }
+        }
+
+        // Initialize the application when the page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            waitForPlotlyAndInit();
+        });
+    </script>
+</body>
+</html>

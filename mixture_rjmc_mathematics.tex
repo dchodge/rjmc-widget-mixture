@@ -1,0 +1,326 @@
+\documentclass[12pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\usepackage{amsthm}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{enumitem}
+
+\geometry{margin=1in}
+
+\title{Mathematical Foundations of Reversible Jump Markov Chain Monte Carlo for Mixture Distributions}
+\author{RJMCMC Widget Documentation}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+
+This document provides a comprehensive mathematical treatment of the Reversible Jump Markov Chain Monte Carlo (RJMCMC) algorithm for fitting mixture distributions, as implemented in the interactive widget. The problem of determining the number of components in a mixture model is a classic example of model selection in Bayesian statistics, where the parameter space has varying dimensionality.
+
+\subsection{Problem Statement}
+
+Given a dataset $\mathbf{y} = \{y_1, y_2, \ldots, y_n\}$, we wish to fit a finite mixture of normal distributions:
+
+\begin{equation}
+f(y|\boldsymbol{\theta}, K) = \sum_{k=1}^{K} \pi_k \mathcal{N}(y|\mu_k, \sigma_k^2)
+\end{equation}
+
+where:
+\begin{itemize}
+\item $K$ is the number of components (unknown)
+\item $\pi_k$ are the mixing proportions with $\sum_{k=1}^K \pi_k = 1$
+\item $\mu_k$ and $\sigma_k^2$ are the mean and variance of component $k$
+\item $\boldsymbol{\theta} = \{\pi_1, \ldots, \pi_K, \mu_1, \ldots, \mu_K, \sigma_1^2, \ldots, \sigma_K^2\}$
+\end{itemize}
+
+The challenge is to simultaneously estimate both the number of components $K$ and the parameters $\boldsymbol{\theta}$, where the dimensionality of $\boldsymbol{\theta}$ depends on $K$.
+
+\section{Mathematical Framework}
+
+\subsection{Likelihood Function}
+
+For a dataset $\mathbf{y} = \{y_1, y_2, \ldots, y_n\}$, the likelihood function is:
+
+\begin{equation}
+L(\boldsymbol{\theta}, K|\mathbf{y}) = \prod_{i=1}^n \sum_{k=1}^K \pi_k \mathcal{N}(y_i|\mu_k, \sigma_k^2)
+\end{equation}
+
+Taking the logarithm:
+
+\begin{equation}
+\ell(\boldsymbol{\theta}, K|\mathbf{y}) = \sum_{i=1}^n \log\left(\sum_{k=1}^K \pi_k \mathcal{N}(y_i|\mu_k, \sigma_k^2)\right)
+\end{equation}
+
+where the normal density is:
+
+\begin{equation}
+\mathcal{N}(y|\mu, \sigma^2) = \frac{1}{\sqrt{2\pi\sigma^2}} \exp\left(-\frac{(y-\mu)^2}{2\sigma^2}\right)
+\end{equation}
+
+\subsection{Prior Distributions}
+
+We specify the following prior distributions:
+
+\subsubsection{Prior for the Number of Components}
+
+\begin{equation}
+p(K) = \frac{1}{K_{\max} - K_{\min} + 1}, \quad K \in \{K_{\min}, K_{\min}+1, \ldots, K_{\max}\}
+\end{equation}
+
+In our implementation: $K_{\min} = 1$, $K_{\max} = 8$.
+
+\subsubsection{Prior for Mixing Proportions}
+
+For each $K$, the mixing proportions follow a Dirichlet distribution:
+
+\begin{equation}
+\boldsymbol{\pi} = (\pi_1, \ldots, \pi_K) \sim \text{Dirichlet}(\alpha_1, \ldots, \alpha_K)
+\end{equation}
+
+With uniform priors: $\alpha_k = 1$ for all $k$.
+
+\subsubsection{Prior for Component Means}
+
+\begin{equation}
+\mu_k \sim \text{Uniform}(a, b), \quad k = 1, \ldots, K
+\end{equation}
+
+In our implementation: $a = 0$, $b = 20$.
+
+\subsubsection{Prior for Component Variances}
+
+\begin{equation}
+\sigma_k^2 \sim \text{Uniform}(c, d), \quad k = 1, \ldots, K
+\end{equation}
+
+In our implementation: $c = 0.3$, $d = 3$.
+
+\subsection{Posterior Distribution}
+
+The joint posterior distribution is:
+
+\begin{equation}
+p(K, \boldsymbol{\theta}|\mathbf{y}) \propto L(\boldsymbol{\theta}, K|\mathbf{y}) \cdot p(\boldsymbol{\theta}|K) \cdot p(K)
+\end{equation}
+
+The log-posterior is:
+
+\begin{equation}
+\log p(K, \boldsymbol{\theta}|\mathbf{y}) = \ell(\boldsymbol{\theta}, K|\mathbf{y}) + \log p(\boldsymbol{\theta}|K) + \log p(K) + \text{constant}
+\end{equation}
+
+\section{Reversible Jump Markov Chain Monte Carlo}
+
+RJMCMC allows sampling from distributions with varying dimensionality by constructing a Markov chain that can jump between different model spaces.
+
+\subsection{Proposal Types}
+
+At each iteration, we propose one of three moves:
+
+\begin{enumerate}
+\item \textbf{Birth move}: Increase $K$ by 1
+\item \textbf{Death move}: Decrease $K$ by 1  
+\item \textbf{Jump move}: Update parameters within the current model
+\end{enumerate}
+
+\subsection{Birth Move}
+
+\subsubsection{Proposal Mechanism}
+
+When proposing a birth move from model $K$ to model $K+1$:
+
+\begin{enumerate}
+\item Generate new mixing proportion: $\pi_{K+1} \sim \text{Beta}(1, K)$
+\item Renormalize existing proportions: $\pi_k' = \pi_k(1 - \pi_{K+1})$ for $k = 1, \ldots, K$
+\item Generate new component parameters:
+\begin{align}
+\mu_{K+1} &\sim \text{Uniform}(a, b) \\
+\sigma_{K+1}^2 &\sim \text{Uniform}(c, d)
+\end{align}
+\end{enumerate}
+
+\subsubsection{Acceptance Probability}
+
+The acceptance probability for a birth move is:
+
+\begin{equation}
+\alpha_{\text{birth}} = \min\left(1, \frac{p(K+1, \boldsymbol{\theta}'|\mathbf{y})}{p(K, \boldsymbol{\theta}|\mathbf{y})} \cdot \frac{q_{\text{death}}(\boldsymbol{\theta}|\boldsymbol{\theta}')}{q_{\text{birth}}(\boldsymbol{\theta}'|\boldsymbol{\theta})} \cdot \frac{p_{\text{death}}}{p_{\text{birth}}}\right)
+\end{equation}
+
+where:
+\begin{itemize}
+\item $q_{\text{birth}}(\boldsymbol{\theta}'|\boldsymbol{\theta})$ is the proposal density for birth
+\item $q_{\text{death}}(\boldsymbol{\theta}|\boldsymbol{\theta}')$ is the proposal density for death
+\item $p_{\text{birth}}$ and $p_{\text{death}}$ are the probabilities of proposing birth and death moves
+\end{itemize}
+
+\subsubsection{Jacobian}
+
+The Jacobian for the birth move transformation is:
+
+\begin{equation}
+J_{\text{birth}} = \frac{\partial(\pi_1', \ldots, \pi_K', \pi_{K+1}, \mu_{K+1}, \sigma_{K+1}^2)}{\partial(\pi_1, \ldots, \pi_K, u_1, u_2, u_3)}
+\end{equation}
+
+where $u_1, u_2, u_3$ are the random variables used to generate the new component.
+
+\subsection{Death Move}
+
+\subsubsection{Proposal Mechanism}
+
+When proposing a death move from model $K$ to model $K-1$:
+
+\begin{enumerate}
+\item Select component $j$ to remove uniformly: $j \sim \text{Uniform}\{1, \ldots, K\}$
+\item Redistribute the removed proportion: $\pi_k' = \frac{\pi_k}{1 - \pi_j}$ for $k \neq j$
+\item Remove $\mu_j$ and $\sigma_j^2$
+\end{enumerate}
+
+\subsubsection{Acceptance Probability}
+
+The acceptance probability for a death move is:
+
+\begin{equation}
+\alpha_{\text{death}} = \min\left(1, \frac{p(K-1, \boldsymbol{\theta}'|\mathbf{y})}{p(K, \boldsymbol{\theta}|\mathbf{y})} \cdot \frac{q_{\text{birth}}(\boldsymbol{\theta}|\boldsymbol{\theta}')}{q_{\text{death}}(\boldsymbol{\theta}'|\boldsymbol{\theta})} \cdot \frac{p_{\text{birth}}}{p_{\text{death}}}\right)
+\end{equation}
+
+\subsection{Jump Move}
+
+For jump moves within the same model, we use standard Metropolis-Hastings updates:
+
+\begin{enumerate}
+\item Update mixing proportions: $\boldsymbol{\pi}' \sim \text{Dirichlet}(\alpha \boldsymbol{\pi})$
+\item Update component means: $\mu_k' \sim \mathcal{N}(\mu_k, \tau_{\mu}^2)$
+\item Update component variances: $\log \sigma_k' \sim \mathcal{N}(\log \sigma_k, \tau_{\sigma}^2)$
+\end{enumerate}
+
+\section{Implementation Details}
+
+\subsection{Log-Posterior Calculation}
+
+In the widget implementation, the log-posterior is calculated as:
+
+\begin{equation}
+\log p(K, \boldsymbol{\theta}|\mathbf{y}) = \sum_{i=1}^n \log\left(\sum_{k=1}^K \pi_k \mathcal{N}(y_i|\mu_k, \sigma_k^2)\right) + \log p(\boldsymbol{\theta}|K) + \log p(K)
+\end{equation}
+
+where:
+\begin{align}
+\log p(\boldsymbol{\theta}|K) &= \sum_{k=1}^K \left[\log p(\mu_k) + \log p(\sigma_k^2)\right] + \log p(\boldsymbol{\pi}) \\
+&= \sum_{k=1}^K \left[\log\left(\frac{1}{b-a}\right) + \log\left(\frac{1}{d-c}\right)\right] + \log\left(\frac{\Gamma(\sum_{k=1}^K \alpha_k)}{\prod_{k=1}^K \Gamma(\alpha_k)} \prod_{k=1}^K \pi_k^{\alpha_k-1}\right)
+\end{align}
+
+\subsection{Multiple Chains}
+
+The widget runs $M = 4$ parallel chains to assess convergence and provide robust estimates. Each chain $m$ maintains its own state:
+
+\begin{equation}
+\boldsymbol{\theta}^{(m)} = \{\pi_1^{(m)}, \ldots, \pi_{K^{(m)}}^{(m)}, \mu_1^{(m)}, \ldots, \mu_{K^{(m)}}^{(m)}, \sigma_1^{(m)}, \ldots, \sigma_{K^{(m)}}^{(m)}\}
+\end{equation}
+
+\subsection{Posterior Summaries}
+
+\subsubsection{Component Probabilities}
+
+The posterior probability of $K$ components is estimated as:
+
+\begin{equation}
+\hat{p}(K|\mathbf{y}) = \frac{1}{M \cdot T} \sum_{m=1}^M \sum_{t=1}^T \mathbb{I}(K^{(m,t)} = K)
+\end{equation}
+
+where $T$ is the number of iterations and $\mathbb{I}(\cdot)$ is the indicator function.
+
+\subsubsection{Parameter Estimates}
+
+For a given $K$, the posterior mean of parameter $\theta_k$ is:
+
+\begin{equation}
+\hat{\theta}_k = \frac{1}{M \cdot T_K} \sum_{m=1}^M \sum_{t: K^{(m,t)} = K} \theta_k^{(m,t)}
+\end{equation}
+
+where $T_K$ is the number of iterations where $K^{(m,t)} = K$.
+
+\section{Convergence Diagnostics}
+
+\subsection{Gelman-Rubin Statistic}
+
+For scalar parameters, the Gelman-Rubin statistic is:
+
+\begin{equation}
+\hat{R} = \sqrt{\frac{\hat{V}}{W}}
+\end{equation}
+
+where:
+\begin{align}
+W &= \frac{1}{M} \sum_{m=1}^M s_m^2 \quad \text{(within-chain variance)} \\
+B &= \frac{T}{M-1} \sum_{m=1}^M (\bar{\theta}_m - \bar{\theta})^2 \quad \text{(between-chain variance)} \\
+\hat{V} &= \frac{T-1}{T} W + \frac{1}{T} B \quad \text{(pooled variance)}
+\end{align}
+
+\subsection{Effective Sample Size}
+
+The effective sample size is:
+
+\begin{equation}
+\text{ESS} = \frac{MT}{1 + 2\sum_{t=1}^{\infty} \rho_t}
+\end{equation}
+
+where $\rho_t$ is the autocorrelation at lag $t$.
+
+\section{Widget Implementation}
+
+\subsection{Data Generation}
+
+The widget generates synthetic data from a 3-component mixture:
+
+\begin{align}
+y_i &\sim 0.3 \cdot \mathcal{N}(2, 1) + 0.7 \cdot \mathcal{N}(6, 0.25) + 1.0 \cdot \mathcal{N}(12, 1) \\
+&= \sum_{k=1}^3 \pi_k \mathcal{N}(\mu_k, \sigma_k^2)
+\end{align}
+
+where $\boldsymbol{\pi} = (0.3, 0.7, 1.0)$, $\boldsymbol{\mu} = (2, 6, 12)$, and $\boldsymbol{\sigma}^2 = (1, 0.25, 1)$.
+
+\subsection{Visualization}
+
+The widget provides real-time visualization of:
+
+\begin{enumerate}
+\item \textbf{Trace plots}: Component count and log-posterior over iterations
+\item \textbf{Component distribution}: Posterior probabilities for each $K$
+\item \textbf{Mixture fit}: Data histogram with fitted density and component means
+\item \textbf{Multiple chains}: All 4 chains displayed simultaneously
+\end{enumerate}
+
+\subsection{Tabbed Interface}
+
+The mixture fit visualization includes tabs for:
+\begin{itemize}
+\item \textbf{Current K}: Real-time fit from the current state
+\item \textbf{Top K=X}: Best fit found for each number of components
+\end{itemize}
+
+Each tab shows the fitted mixture density with vertical lines indicating component means.
+
+\section{Conclusion}
+
+The RJMCMC algorithm provides a principled approach to Bayesian model selection for mixture distributions. The mathematical framework ensures detailed balance and proper exploration of the model space, while the multiple-chain implementation provides robust convergence diagnostics. The interactive widget demonstrates these concepts through real-time visualization of the sampling process.
+
+The key mathematical components include:
+\begin{itemize}
+\item Proper prior specification across varying dimensions
+\item Careful proposal mechanisms for birth/death moves
+\item Correct Jacobian calculations for dimension-changing moves
+\item Multiple-chain implementation for convergence assessment
+\item Real-time posterior summarization and visualization
+\end{itemize}
+
+This implementation serves as both an educational tool and a practical demonstration of advanced Bayesian computational methods.
+
+\end{document}
