@@ -55,6 +55,7 @@ let rjmcState = {
     showBurnin: true, // Toggle for showing burn-in samples
     dynamicParameterPlots: false, // Toggle for dynamic parameter plot updates
     updateFrequency: 10, // Update plots every N iterations (will be dynamic)
+    lastPlotUpdate: 0, // Track last plot update time to prevent flashing
     cleanupFrequency: 500, // Clean up old data every N iterations (more frequent)
     maxDisplayPoints: 1000 // Maximum points to display during run
 };
@@ -181,6 +182,35 @@ function initializeJumpMatrix() {
     const mu = [1, 4];
     const sigma = [1, 1];
     return { p: p, mu: mu, sigma: sigma };
+}
+
+// Order components by magnitude (means) for identifiability across chains
+function orderComponentsByMagnitude(jump) {
+    if (!jump || !jump.mu || jump.mu.length <= 1) {
+        return; // Nothing to order
+    }
+    
+    // Create array of indices sorted by mean values
+    const sortedIndices = jump.mu
+        .map((mean, index) => ({ mean, index }))
+        .sort((a, b) => a.mean - b.mean)
+        .map(item => item.index);
+    
+    // Reorder all arrays according to sorted indices
+    const orderedP = sortedIndices.map(i => jump.p[i]);
+    const orderedMu = sortedIndices.map(i => jump.mu[i]);
+    const orderedSigma = sortedIndices.map(i => jump.sigma[i]);
+    
+    // Update the jump object
+    jump.p = orderedP;
+    jump.mu = orderedMu;
+    jump.sigma = orderedSigma;
+    
+    console.log(`[RJMCMC] Ordered components by magnitude:`, {
+        original: jump.mu,
+        ordered: orderedMu,
+        indices: sortedIndices
+    });
 }
 
 // Log factorial function for Poisson prior
@@ -344,6 +374,9 @@ function runRJMCMCStep() {
                 chain.currentJump = proposedJump;
                 chain.logPosterior = proposedLogPost;
                 chain.acceptedMoves++;
+                
+                // Order components by magnitude (means) for identifiability
+                orderComponentsByMagnitude(chain.currentJump);
             }
         }
         
@@ -413,8 +446,13 @@ function runRJMCMCStep() {
             if (!rjmcState.kPosteriorSamples[k]) {
                 rjmcState.kPosteriorSamples[k] = [];
             }
+            
+            // Create a copy of the current jump and ensure it's ordered
+            const orderedJump = JSON.parse(JSON.stringify(chain.currentJump));
+            orderComponentsByMagnitude(orderedJump);
+            
             rjmcState.kPosteriorSamples[k].push({
-                jump: JSON.parse(JSON.stringify(chain.currentJump)),
+                jump: orderedJump,
                 logPosterior: chain.logPosterior
             });
         });
@@ -424,6 +462,7 @@ function runRJMCMCStep() {
             console.log('[RJMCMC] kPosteriorSamples status:', Object.keys(rjmcState.kPosteriorSamples).map(k => 
                 `${k}: ${rjmcState.kPosteriorSamples[k].length} samples`
             ));
+            console.log('[RJMCMC] Current iteration:', rjmcState.iterations, 'Burn-in:', burnin);
         }
     }
 }
@@ -497,10 +536,15 @@ async function runRJMCMCAnalysis(settings = {}) {
                 updateConvergenceDiagnostics();
             }
             
-            // Update mixture fit and component distribution every 500 iterations for better performance
-            if (i % 500 === 0 && i > 0) {
-                updateMixtureFit();
-                updateComponentDistribution();
+            // Update both plots every 100 iterations for consistent updates
+            if (i % 100 === 0 && i > 0) {
+                const now = Date.now();
+                // Throttle updates to prevent flashing (minimum 200ms between updates)
+                if (now - rjmcState.lastPlotUpdate > 200) {
+                    updateComponentDistribution();
+                    updateMixtureFit();
+                    rjmcState.lastPlotUpdate = now;
+                }
                 
                 // Show posterior distribution container when we have data
                 const posteriorContainer = document.getElementById('posteriorDistContainer');
@@ -594,6 +638,13 @@ function updateFinalResults() {
         console.log('[RJMCMC] updateFinalResults called');
         console.log('[RJMCMC] kProbabilities:', rjmcState.kProbabilities);
         console.log('[RJMCMC] kHistory length:', rjmcState.kHistory.length);
+        console.log('[RJMCMC] kPosteriorSamples:', rjmcState.kPosteriorSamples);
+        console.log('[RJMCMC] chains length:', rjmcState.chains ? rjmcState.chains.length : 0);
+        if (rjmcState.chains) {
+            rjmcState.chains.forEach((chain, i) => {
+                console.log(`[RJMCMC] Chain ${i}: kHistory length = ${chain.kHistory ? chain.kHistory.length : 0}`);
+            });
+        }
         
         // Calculate final K probabilities
         const totalIterations = rjmcState.kHistory.length;
@@ -659,31 +710,6 @@ function updateAllCharts() {
 }
 
 // Test function to create a simple plot
-function testComponentTracePlot() {
-    console.log('[RJMCMC] Testing component trace plot...');
-    
-    const testData = [{
-        x: [1, 2, 3, 4, 5],
-        y: [2, 3, 2, 4, 3],
-        type: 'scatter',
-        mode: 'lines',
-        name: 'Test Chain',
-        line: { color: '#000000', width: 2 }
-    }];
-    
-    const layout = {
-        title: 'Test Plot',
-        xaxis: { title: 'Iteration', autorange: true },
-        yaxis: { title: 'K', autorange: true, fixedrange: false }
-    };
-    
-    try {
-        Plotly.newPlot('componentTraceChart', testData, layout);
-        console.log('[RJMCMC] Test plot created successfully');
-    } catch (error) {
-        console.error('[RJMCMC] Test plot failed:', error);
-    }
-}
 
 // Update component trace plot
 function updateComponentTracePlot() {
@@ -692,8 +718,28 @@ function updateComponentTracePlot() {
     console.log('[RJMCMC] rjmcState.chains:', rjmcState.chains);
     
     if (!rjmcState.kHistory || rjmcState.kHistory.length === 0) {
-        console.log('[RJMCMC] No kHistory data, showing test plot instead');
-        testComponentTracePlot();
+        console.log('[RJMCMC] No kHistory data, showing empty plot instead');
+        // Show empty plot when no data is available
+        const emptyData = [{
+            x: [],
+            y: [],
+            type: 'scatter',
+            mode: 'lines',
+            name: 'No data yet',
+            line: { color: '#000000', width: 2 }
+        }];
+        
+        const layout = {
+            title: 'Component Trace (No Data)',
+            xaxis: { title: 'Iteration', autorange: true },
+            yaxis: { title: 'K', autorange: true, fixedrange: false }
+        };
+        
+        try {
+            Plotly.newPlot('componentTraceChart', emptyData, layout);
+        } catch (error) {
+            console.error('[RJMCMC] Failed to create empty plot:', error);
+        }
         return;
     }
     
@@ -930,6 +976,7 @@ function updateComponentDistribution() {
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
+                animation: false, // Disable animations to prevent flashing
                 scales: {
                     y: {
                         beginAtZero: true,
@@ -998,6 +1045,7 @@ function updateComponentDistribution() {
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
+                animation: false, // Disable animations to prevent flashing
                 scales: {
                     y: {
                         beginAtZero: true,
@@ -1029,6 +1077,7 @@ function updateComponentDistribution() {
         const container = document.getElementById('posteriorDistContainer');
         if (container) {
             container.style.display = 'block';
+            console.log('[RJMCMC] Made posterior distribution container visible');
         }
         
     } catch (error) {
@@ -1617,10 +1666,6 @@ function toggleDynamicParameterPlots() {
 }
 
 // Manual function to test convergence diagnostics
-function testConvergenceDiagnostics() {
-    console.log('[RJMCMC] Manual convergence diagnostics test');
-    updateConvergenceDiagnostics();
-}
 
 function updatePlotStatus() {
     const statusElement = document.getElementById('plotStatus');
@@ -1714,81 +1759,155 @@ function updateMixtureFit() {
     }
     
     console.log('[RJMCMC] Canvas found:', canvas);
-    console.log('[RJMCMC] kPosteriorSamples:', rjmcState.kPosteriorSamples);
-    console.log('[RJMCMC] currentTab:', rjmcState.currentTab);
+    
+    // Make sure the tab content is visible
+    const tabContent = document.getElementById('mixtureFitContent');
+    if (tabContent) {
+        tabContent.classList.add('active');
+        console.log('[RJMCMC] Made mixture fit tab content visible');
+    }
+    
+    console.log('[RJMCMC] Canvas dimensions:', {
+        width: canvas.width,
+        height: canvas.height,
+        clientWidth: canvas.clientWidth,
+        clientHeight: canvas.clientHeight,
+        offsetWidth: canvas.offsetWidth,
+        offsetHeight: canvas.offsetHeight
+    });
+    
+    // Check if canvas is visible
+    const canvasStyle = window.getComputedStyle(canvas);
+    console.log('[RJMCMC] Canvas visibility:', {
+        display: canvasStyle.display,
+        visibility: canvasStyle.visibility,
+        opacity: canvasStyle.opacity
+    });
     
     const ctx = canvas.getContext('2d');
     
     if (mixtureFitChart) {
-        console.log('[RJMCMC] Destroying existing mixture fit chart');
         mixtureFitChart.destroy();
         mixtureFitChart = null;
     }
     
     try {
-        // Show raw data histogram
+        // Create histogram for raw data
         const histogram = createHistogram(currentData.obs, 40);
+        console.log('[RJMCMC] Created histogram with', histogram.x.length, 'bins');
         
-        // Create fitted mixture density from posterior samples
-        const k = parseInt(rjmcState.currentTab ? rjmcState.currentTab.replace('top', '') : '2');
-        const samples = rjmcState.kPosteriorSamples[k] || [];
-        
-        console.log(`[RJMCMC] Creating mixture fit for K=${k} with ${samples.length} samples`);
-        
-        let fittedDensity;
-        if (samples.length === 0) {
-            // No samples yet, create zero density
-            fittedDensity = histogram.x.map(() => 0);
-        } else {
-            fittedDensity = histogram.x.map(x => {
-                let totalDensity = 0;
-                
-                // Average over all posterior samples for this K
-                samples.forEach(sample => {
-                    let sampleDensity = 0;
-                    
-                    // Order the means from lowest to highest for this sample
-                    const muValues = sample.jump.mu.slice();
-                    const sigmaValues = sample.jump.sigma.slice();
-                    const pValues = sample.jump.p.slice();
-                    
-                    // Create indices sorted by mean values
-                    const sortedIndices = muValues
-                        .map((val, idx) => ({ val, idx }))
-                        .sort((a, b) => a.val - b.val)
-                        .map(item => item.idx);
-                    
-                    // Use ordered values
-                    for (let j = 0; j < sortedIndices.length; j++) {
-                        const originalIdx = sortedIndices[j];
-                        sampleDensity += pValues[originalIdx] * normalDensity(parseFloat(x), muValues[originalIdx], sigmaValues[originalIdx]);
-                    }
-                    
-                    totalDensity += sampleDensity;
-                });
-                
-                // Average over all samples
-                return (totalDensity / samples.length) * 100; // Scale for visualization
-            });
+        // Get the selected K value from the current tab
+        let selectedK = null;
+        if (rjmcState.currentTab) {
+            selectedK = parseInt(rjmcState.currentTab.replace('top', ''));
+            console.log('[RJMCMC] Selected K from current tab:', selectedK);
         }
         
-        // Create datasets array - only show fitted mixture, not raw data
+        // Determine which K values to plot
+        let topKValues = [];
+        if (selectedK !== null) {
+            // Use the selected K value from the tab
+            topKValues = [selectedK];
+            console.log('[RJMCMC] Using selected K value from tab:', selectedK);
+        } else if (rjmcState.chains && rjmcState.chains.length > 0) {
+            // Fallback: collect all K values from all chains and get top 3
+            let allKValues = [];
+            rjmcState.chains.forEach(chain => {
+                if (chain.kHistory && chain.kHistory.length > 0) {
+                    allKValues = allKValues.concat(chain.kHistory);
+                }
+            });
+            
+            // Count frequencies and get top 3
+            const kCounts = {};
+            allKValues.forEach(k => {
+                kCounts[k] = (kCounts[k] || 0) + 1;
+            });
+            
+            topKValues = Object.keys(kCounts)
+                .map(Number)
+                .sort((a, b) => kCounts[b] - kCounts[a])
+                .slice(0, 3);
+            console.log('[RJMCMC] Using top 3 K values (no tab selected):', topKValues);
+        }
+        
+        console.log('[RJMCMC] K values to plot:', topKValues);
+        
+        // Create datasets array
         const datasets = [];
         
-        // Only add fitted mixture if we have samples
-        if (samples.length > 0) {
-            datasets.push({
-                label: `Fitted Mixture (${samples.length} samples)`,
-                data: fittedDensity,
-                type: 'line',
-                borderColor: '#000000',
-                backgroundColor: 'transparent',
-                borderWidth: 3,
-                fill: false,
-                tension: 0.1
-            });
-        } else {
-            // Show placeholder when no samples
+        // Add raw data histogram
+        datasets.push({
+            label: 'Raw Data',
+            data: histogram.y,
+            type: 'bar',
+            backgroundColor: 'rgba(128, 128, 128, 0.3)',
+            borderColor: 'rgba(128, 128, 128, 0.8)',
+            borderWidth: 1,
+            yAxisID: 'y'
+        });
+        
+        // Add fitted mixture for each of the K values
+        const colors = ['#FF6B6B', '#4ECDC4', '#45B7D1'];
+        topKValues.forEach((k, kIndex) => {
+            const samples = rjmcState.kPosteriorSamples[k] || [];
+            console.log(`[RJMCMC] Plotting K=${k}: ${samples.length} samples`);
+            console.log(`[RJMCMC] K=${k} samples preview:`, samples.slice(0, 2));
+            
+            // Show the means from the first few samples to verify ordering
+            if (samples.length > 0) {
+                console.log(`[RJMCMC] K=${k} first sample means:`, samples[0].jump.mu);
+                console.log(`[RJMCMC] K=${k} second sample means:`, samples[1] ? samples[1].jump.mu : 'N/A');
+            }
+            
+            if (samples.length > 0) {
+                // Calculate predictive mixture density
+                const fittedDensity = histogram.x.map(x => {
+                    let totalDensity = 0;
+                    
+                    samples.forEach(sample => {
+                        let sampleDensity = 0;
+                        
+                        // Order the means from lowest to highest for this sample
+                        const muValues = sample.jump.mu.slice();
+                        const sigmaValues = sample.jump.sigma.slice();
+                        const pValues = sample.jump.p.slice();
+                        
+                        // Create indices sorted by mean values
+                        const sortedIndices = muValues
+                            .map((val, idx) => ({ val, idx }))
+                            .sort((a, b) => a.val - b.val)
+                            .map(item => item.idx);
+                        
+                        // Use ordered values
+                        for (let j = 0; j < sortedIndices.length; j++) {
+                            const originalIdx = sortedIndices[j];
+                            sampleDensity += pValues[originalIdx] * normalDensity(parseFloat(x), muValues[originalIdx], sigmaValues[originalIdx]);
+                        }
+                        
+                        totalDensity += sampleDensity;
+                    });
+                    
+                    // Average over all samples - no additional scaling needed since both are densities
+                    return totalDensity / samples.length;
+                });
+                
+                datasets.push({
+                    label: `K=${k} (${samples.length} samples)`,
+                    data: fittedDensity,
+                    type: 'line',
+                    borderColor: colors[kIndex % colors.length],
+                    backgroundColor: 'transparent',
+                    borderWidth: 3,
+                    fill: false,
+                    tension: 0.1,
+                    yAxisID: 'y'
+                });
+            }
+        });
+        
+        // If no samples available, show placeholder
+        if (topKValues.length === 0 || !topKValues.some(k => (rjmcState.kPosteriorSamples[k] || []).length > 0)) {
             datasets.push({
                 label: 'Fitted Mixture (No data yet)',
                 data: histogram.x.map(() => 0),
@@ -1797,52 +1916,73 @@ function updateMixtureFit() {
                 backgroundColor: 'transparent',
                 borderWidth: 2,
                 fill: false,
-                borderDash: [5, 5]
+                borderDash: [5, 5],
+                yAxisID: 'y'
             });
         }
         
-        // Add vertical lines for component means if we have current jump data
-        if (samples.length > 0 && rjmcState.currentJump && rjmcState.currentJump.mu) {
-            const maxDensity = Math.max(...fittedDensity);
-            const binWidth = parseFloat(histogram.x[1]) - parseFloat(histogram.x[0]);
+        // Add vertical lines for component means
+        if (topKValues.length > 0 && topKValues.some(k => (rjmcState.kPosteriorSamples[k] || []).length > 0)) {
+            // Use the selected K value from the current tab, not the first available one
+            const selectedK = topKValues[0]; // This will be the selected K from the tab logic above
+            const samples = rjmcState.kPosteriorSamples[selectedK] || [];
             
-            rjmcState.currentJump.mu.forEach((mean, index) => {
-                // Find the bin index for the mean
-                const meanIndex = histogram.x.findIndex(x => {
-                    const binCenter = parseFloat(x);
-                    return Math.abs(binCenter - mean) <= binWidth / 2;
-                });
+            if (samples.length > 0) {
+                // Calculate mean of means for each component across all samples
+                const componentMeans = [];
+                const numComponents = samples[0].jump.mu.length;
                 
-                if (meanIndex !== -1) {
-                    // Create vertical line for mean
-                    const meanLineData = new Array(histogram.x.length).fill(null);
-                    meanLineData[meanIndex] = maxDensity * 0.9;
-                
-                    datasets.push({
-                        label: `Component ${index + 1} Mean (${mean.toFixed(2)})`,
-                        data: meanLineData,
-                        type: 'line',
-                        borderColor: `hsl(${index * 60}, 70%, 50%)`,
-                        backgroundColor: `hsl(${index * 60}, 70%, 50%)`,
-                        borderWidth: 4,
-                        pointRadius: 6,
-                        pointHoverRadius: 8,
-                        fill: false,
-                        tension: 0,
-                        borderDash: [0, 0], // Solid line
-                        showLine: true,
-                        spanGaps: false
-                    });
+                for (let comp = 0; comp < numComponents; comp++) {
+                    const means = samples.map(sample => sample.jump.mu[comp]);
+                    const avgMean = means.reduce((sum, mean) => sum + mean, 0) / means.length;
+                    componentMeans.push(avgMean);
                 }
-            });
+                
+                console.log(`[RJMCMC] Component means for K=${selectedK}:`, componentMeans);
+                
+                // Create vertical lines for each component mean
+                componentMeans.forEach((mean, compIndex) => {
+                    // Find the closest bin to the mean
+                    const binWidth = parseFloat(histogram.x[1]) - parseFloat(histogram.x[0]);
+                    const meanIndex = histogram.x.findIndex(x => {
+                        const binCenter = parseFloat(x);
+                        return Math.abs(binCenter - mean) <= binWidth / 2;
+                    });
+                    
+                    if (meanIndex !== -1) {
+                        // Create vertical line data
+                        const maxDensity = Math.max(...histogram.y);
+                        const verticalLineData = new Array(histogram.x.length).fill(null);
+                        verticalLineData[meanIndex] = maxDensity * 0.9; // 90% of max height
+                        
+                        datasets.push({
+                            label: `Component ${compIndex + 1} Mean (${mean.toFixed(2)})`,
+                            data: verticalLineData,
+                            type: 'line',
+                            borderColor: `hsl(${compIndex * 60}, 70%, 50%)`,
+                            backgroundColor: `hsl(${compIndex * 60}, 70%, 50%)`,
+                            borderWidth: 4,
+                            pointRadius: 6,
+                            pointHoverRadius: 8,
+                            fill: false,
+                            tension: 0,
+                            borderDash: [0, 0], // Solid line
+                            showLine: true,
+                            spanGaps: false,
+                            yAxisID: 'y'
+                        });
+                    }
+                });
+            }
         }
         
-        // Calculate appropriate y-axis maximum based on fitted density only
-        const maxFittedDensity = samples.length > 0 ? Math.max(...fittedDensity) : 0;
-        const yMax = maxFittedDensity > 0 ? maxFittedDensity * 1.2 : 10; // Default max if no data
+        // Calculate y-axis maximum
+        const maxHistogram = Math.max(...histogram.y);
+        const maxFitted = Math.max(...datasets.filter(d => d.type === 'line').map(d => Math.max(...d.data)));
+        const yMax = Math.max(maxHistogram, maxFitted) * 1.1;
         
         mixtureFitChart = new Chart(ctx, {
-            type: 'line',
+            type: 'bar',
             data: {
                 labels: histogram.x,
                 datasets: datasets
@@ -1850,11 +1990,12 @@ function updateMixtureFit() {
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                height: 300, // Fixed height
+                height: 300,
+                animation: false, // Disable animations to prevent flashing
                 scales: {
                     y: {
                         beginAtZero: true,
-                        max: yMax, // Set max based on fitted density only
+                        max: yMax,
                         title: {
                             display: true,
                             text: 'Density'
@@ -1885,6 +2026,14 @@ function updateMixtureFit() {
             }
         });
         
+        console.log('[RJMCMC] Mixture fit chart created successfully:', mixtureFitChart);
+        
+        // Force a resize to ensure the chart renders properly
+        if (mixtureFitChart && typeof mixtureFitChart.resize === 'function') {
+            mixtureFitChart.resize();
+            console.log('[RJMCMC] Chart resized');
+        }
+        
     } catch (error) {
         console.error('[RJMCMC] Failed to update mixture fit:', error);
     }
@@ -1895,6 +2044,7 @@ function createHistogram(data, bins) {
     const min = Math.min(...data);
     const max = Math.max(...data);
     const binWidth = (max - min) / bins;
+    const totalDataPoints = data.length;
     
     const histogram = {
         x: [],
@@ -1908,27 +2058,26 @@ function createHistogram(data, bins) {
         
         const count = data.filter(d => d >= binStart && d < binEnd).length;
         
+        // Convert count to density: density = count / (totalDataPoints * binWidth)
+        // This ensures the histogram integrates to 1
+        const density = count / (totalDataPoints * binWidth);
+        
         histogram.x.push(binCenter.toFixed(2));
-        histogram.y.push(count);
+        histogram.y.push(density);
     }
+    
+    console.log('[RJMCMC] Created histogram with density values (integral should be ~1)');
+    console.log('[RJMCMC] Histogram stats:', {
+        totalDataPoints: totalDataPoints,
+        binWidth: binWidth,
+        sumOfDensities: histogram.y.reduce((sum, y) => sum + y * binWidth, 0),
+        maxDensity: Math.max(...histogram.y)
+    });
     
     return histogram;
 }
 
 // Test if Plotly is loaded
-function testPlotlyLoaded() {
-    console.log('[RJMCMC] Testing if Plotly is loaded...');
-    console.log('[RJMCMC] typeof Plotly:', typeof Plotly);
-    console.log('[RJMCMC] Plotly object:', Plotly);
-    
-    if (typeof Plotly === 'undefined') {
-        console.error('[RJMCMC] Plotly is not loaded!');
-        return false;
-    } else {
-        console.log('[RJMCMC] Plotly is loaded successfully');
-        return true;
-    }
-}
 
 // Simple test to create a basic plot
 function createSimpleTestPlot() {
@@ -1957,30 +2106,6 @@ function createSimpleTestPlot() {
 }
 
 // Test function for raw data plot
-function testRawDataPlot() {
-    console.log('[RJMCMC] Testing raw data plot...');
-    
-    const testData = [{
-        x: [1, 2, 2, 3, 3, 3, 4, 4, 5],
-        type: 'histogram',
-        nbinsx: 5,
-        marker: { color: 'rgba(0,0,0,0.7)' },
-        name: 'Test Data'
-    }];
-    
-    const layout = {
-        title: 'Test Raw Data',
-        xaxis: { title: 'Value' },
-        yaxis: { title: 'Frequency' }
-    };
-    
-    try {
-        Plotly.newPlot('rawDataChart', testData, layout);
-        console.log('[RJMCMC] Test raw data plot created successfully');
-    } catch (error) {
-        console.error('[RJMCMC] Test raw data plot failed:', error);
-    }
-}
 
 // Show raw data visualization
 function showRawDataVisualization() {
@@ -1988,7 +2113,7 @@ function showRawDataVisualization() {
     console.log('[RJMCMC] currentData:', currentData);
     
     // Test if Plotly is loaded
-    if (!testPlotlyLoaded()) {
+    if (typeof Plotly === 'undefined') {
         console.error('[RJMCMC] Cannot create plots - Plotly not loaded');
         return;
     }
@@ -2086,20 +2211,25 @@ function switchMixtureTab(tabName) {
     const tabButton = document.getElementById(`tab-${tabName}`);
     if (tabButton) {
         tabButton.classList.add('active');
+        console.log(`[RJMCMC] Activated tab button: ${tabButton.textContent}`);
     }
     
     // Update current tab
     rjmcState.currentTab = tabName;
+    console.log(`[RJMCMC] Set currentTab to: ${rjmcState.currentTab}`);
     
     // Show/hide download button based on available data
     const downloadBtn = document.getElementById('downloadPosteriorsBtn');
     if (downloadBtn) {
         const k = parseInt(tabName.replace('top', ''));
+        console.log(`[RJMCMC] Extracted K value: ${k} from tab name: ${tabName}`);
         const hasData = rjmcState.kPosteriorSamples[k] && rjmcState.kPosteriorSamples[k].length > 0;
+        console.log(`[RJMCMC] K=${k} has data: ${hasData} (${rjmcState.kPosteriorSamples[k] ? rjmcState.kPosteriorSamples[k].length : 0} samples)`);
         downloadBtn.style.display = hasData ? 'block' : 'none';
     }
     
     // Update the mixture fit visualization
+    console.log(`[RJMCMC] Calling updateMixtureFit with currentTab: ${rjmcState.currentTab}`);
     updateMixtureFit();
 }
 
@@ -2563,6 +2693,12 @@ function stopRJMCMCAnalysis() {
         
         // Hide progress bar
         hideProgressBar();
+        
+        // Reset plots to show current state
+        updateComponentTracePlot();
+        updateLogPosteriorPlot();
+        updateComponentDistribution();
+        updateMixtureFit();
     }
 }
 
@@ -2587,11 +2723,9 @@ async function initSimpleApp() {
         
         // Component distribution chart will be shown at the end of the run
         
-        // Initialize mixture fit with raw data
-        updateMixtureFit();
-        
-        // Initialize component distribution
+        // Initialize plots immediately without delays
         updateComponentDistribution();
+        updateMixtureFit();
         
         // Show posterior distribution container
         const posteriorContainer = document.getElementById('posteriorDistContainer');
@@ -2635,9 +2769,110 @@ async function initSimpleApp() {
 }
 
 // Start RJMCMC analysis
+// Reset all state and plots for a fresh analysis
+function resetAnalysisState() {
+    console.log('[RJMCMC] Resetting analysis state...');
+    
+    // Reset RJMCMC state
+    rjmcState.iterations = 0;
+    rjmcState.chains = [];
+    rjmcState.kHistory = [];
+    rjmcState.logPostHistory = [];
+    rjmcState.kProbabilities = {};
+    rjmcState.kPosteriorSamples = {};
+    rjmcState.kPosteriorMeans = {};
+    rjmcState.currentTab = 'top1';
+    rjmcState.isAnalysisRunning = false;
+    rjmcState.lastPlotUpdate = 0;
+    
+    // Reset parameter traces
+    rjmcState.parameterTraces = {
+        mu: [],
+        sigma: []
+    };
+    
+    // Clear all charts
+    if (typeof componentDistChart !== 'undefined' && componentDistChart) {
+        componentDistChart.destroy();
+        componentDistChart = null;
+    }
+    
+    if (typeof mixtureFitChart !== 'undefined' && mixtureFitChart) {
+        mixtureFitChart.destroy();
+        mixtureFitChart = null;
+    }
+    
+    // Clear Plotly charts
+    try {
+        if (typeof Plotly !== 'undefined') {
+            Plotly.purge('componentTraceChart');
+            Plotly.purge('logPosteriorChart');
+            Plotly.purge('rawDataChart');
+        }
+    } catch (error) {
+        console.log('[RJMCMC] Error clearing Plotly charts:', error);
+    }
+    
+    // Hide progress bar
+    const progressContainer = document.getElementById('progressContainer');
+    if (progressContainer) {
+        progressContainer.style.display = 'none';
+    }
+    
+    // Reset progress bar
+    const progressBar = document.getElementById('progressBar');
+    const progressPercent = document.getElementById('progressPercent');
+    const currentIteration = document.getElementById('currentIteration');
+    const totalIterations = document.getElementById('totalIterations');
+    
+    if (progressBar) progressBar.style.width = '0%';
+    if (progressPercent) progressPercent.textContent = '0%';
+    if (currentIteration) currentIteration.textContent = '0';
+    if (totalIterations) totalIterations.textContent = '0';
+    
+    // Clear convergence diagnostics
+    const essDisplay = document.getElementById('ess-display');
+    const gelmanDisplay = document.getElementById('gelman-rubin-display');
+    const acceptanceDisplay = document.getElementById('acceptance-rates-display');
+    
+    if (essDisplay) essDisplay.textContent = 'N/A';
+    if (gelmanDisplay) gelmanDisplay.textContent = 'N/A';
+    if (acceptanceDisplay) acceptanceDisplay.textContent = 'N/A';
+    
+    // Clear status
+    const statusElement = document.getElementById('status');
+    if (statusElement) {
+        statusElement.style.display = 'none';
+        statusElement.textContent = '';
+    }
+    
+    // Clear mixture tabs
+    const tabsHeader = document.querySelector('.tabs-header');
+    if (tabsHeader) {
+        tabsHeader.innerHTML = '';
+    }
+    
+    // Hide posterior distribution container initially
+    const posteriorContainer = document.getElementById('posteriorDistContainer');
+    if (posteriorContainer) {
+        posteriorContainer.style.display = 'none';
+    }
+    
+    // Update plots to show empty states
+    updateComponentTracePlot();
+    updateLogPosteriorPlot();
+    updateComponentDistribution();
+    updateMixtureFit();
+    
+    console.log('[RJMCMC] Analysis state reset complete');
+}
+
 async function startRJMCMCAnalysis() {
     try {
         console.log('[RJMCMC] Starting RJMCMC analysis...');
+        
+        // Reset everything for a fresh start
+        resetAnalysisState();
         
         // Check if data is available
         if (!currentData || !currentData.obs || currentData.obs.length === 0) {
@@ -2843,86 +3078,17 @@ function updateProgressBar(currentIteration, totalIterations) {
 }
 
 // Test function for posterior distribution
-function testPosteriorDistribution() {
-    console.log('[RJMCMC] Testing posterior distribution...');
-    
-    // Create test data for all chains
-    console.log('[RJMCMC] Creating test chains data');
-    rjmcState.chains = [
-        {
-            kHistory: [2, 2, 2, 3, 3, 2, 3, 3, 4, 3, 2, 3, 4, 4, 3, 2, 3, 2, 3, 3, 2, 2, 3, 4, 3, 2, 3, 3, 4, 3]
-        },
-        {
-            kHistory: [2, 3, 3, 3, 2, 3, 4, 3, 3, 2, 3, 4, 3, 2, 3, 3, 4, 3, 2, 3, 3, 2, 3, 4, 3, 2, 3, 3, 4, 3]
-        },
-        {
-            kHistory: [2, 2, 3, 2, 3, 3, 4, 3, 2, 3, 4, 4, 3, 2, 3, 3, 2, 3, 4, 3, 2, 3, 3, 4, 3, 2, 3, 3, 4, 3]
-        },
-        {
-            kHistory: [3, 3, 2, 3, 4, 3, 2, 3, 3, 4, 3, 2, 3, 3, 2, 3, 4, 3, 3, 2, 3, 4, 3, 2, 3, 3, 4, 3, 2, 3]
-        }
-    ];
-    
-    console.log('[RJMCMC] Test chains created:', rjmcState.chains.length);
-    updateComponentDistribution();
-}
 
-// Test function for mixture fit
-function testMixtureFit() {
-    console.log('[RJMCMC] Testing mixture fit...');
-    
-    // Create test data
-    if (!currentData) {
-        console.log('[RJMCMC] Creating test data for mixture fit');
-        currentData = {
-            obs: Array.from({length: 100}, () => Math.random() * 10 - 5)
-        };
-    }
-    
-    // Create test posterior samples
-    if (!rjmcState.kPosteriorSamples || Object.keys(rjmcState.kPosteriorSamples).length === 0) {
-        console.log('[RJMCMC] Creating test posterior samples');
-        rjmcState.kPosteriorSamples = {
-            '2': Array.from({length: 50}, () => ({
-                jump: {
-                    p: [0.5, 0.5],
-                    mu: [1, 4],
-                    sigma: [1, 1]
-                },
-                logPosterior: -100
-            })),
-            '3': Array.from({length: 30}, () => ({
-                jump: {
-                    p: [0.33, 0.33, 0.34],
-                    mu: [0, 2, 5],
-                    sigma: [1, 1, 1]
-                },
-                logPosterior: -95
-            }))
-        };
-        rjmcState.currentTab = 'top2';
-    }
-    
-    console.log('[RJMCMC] Test data created, calling updateMixtureFit');
-    updateMixtureFit();
-}
+
 
 // Make functions globally available
 window.initSimpleApp = initSimpleApp;
 window.startRJMCMCAnalysis = startRJMCMCAnalysis;
 window.showRawDataVisualization = showRawDataVisualization;
-window.testPosteriorDistribution = testPosteriorDistribution;
-window.testMixtureFit = testMixtureFit;
-window.testPlotly = createSimpleTestPlot;
-window.testComponentPlot = testComponentTracePlot;
+window.updateParameterTracePlots = updateParameterTracePlots;
 window.loadDemoData = loadDemoData;
 window.downloadPosteriors = downloadPosteriors;
 
-// Add a simple test function
-window.testButton = function() {
-    console.log('[RJMCMC] Test button clicked!');
-    alert('Button click is working!');
-};
 
 // Initialize when DOM is loaded and Plotly is available
 function waitForPlotlyAndInit() {
