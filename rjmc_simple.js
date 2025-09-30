@@ -45,6 +45,7 @@ let rjmcState = {
     currentTab: 'top1',
     kPosteriorSamples: {}, // Store all posterior samples for each K
     kPosteriorMeans: {}, // Store posterior means for each K
+    isAnalysisRunning: false, // Track if analysis is running
     parameterTraces: {
         mu: [], // Store mean traces for each chain
         sigma: [] // Store sigma traces for each chain
@@ -469,7 +470,7 @@ async function runRJMCMCAnalysis(settings = {}) {
                 // Update visualizations with fixed frequency for better performance
                 const updateFreq = i < 100 ? 10 : 100; // Every 10 iterations for first 100, then every 100
                 if (i % updateFreq === 0 || i < 100 || i === finalSettings.iterations - 1) {
-                    updateVisualizations(i + 1); // Pass current iteration number
+                    updateVisualizations(); // Update all visualizations
                 }
                 
                 // Always add a small delay for UI responsiveness and to prevent browser freezing
@@ -481,6 +482,12 @@ async function runRJMCMCAnalysis(settings = {}) {
                 console.log(`[RJMCMC] Updating convergence diagnostics at iteration ${i}`);
                 updateConvergenceDiagnostics();
             }
+            
+            // Update mixture fit and component distribution every 500 iterations for better performance
+            if (i % 500 === 0 && i > 0) {
+                updateMixtureFit();
+                updateComponentDistribution();
+            }
         }
         
         if (isAnalysisRunning) {
@@ -491,24 +498,18 @@ async function runRJMCMCAnalysis(settings = {}) {
             console.log('[RJMCMC] Final convergence diagnostics update');
             updateConvergenceDiagnostics();
             
-            // Set MCMC as not running and update parameter trace plots
-            setMCMCRunningState(false);
-            updateParameterTracePlots(); // Update parameter plots once at the end
+        // Set MCMC as not running and update parameter trace plots
+        setMCMCRunningState(false);
+        updateParameterTracePlots(); // Update parameter plots once at the end
+        
+        // Update mixture fit and component distribution
+        updateMixtureFit();
+        updateComponentDistribution();
+        
+        // Update mixture tabs to show available K values
+        updateMixtureTabs();
             
-            // Update mixture tabs to show mode first
-            console.log('[RJMCMC] Final mixture tabs update to show mode');
-            forceUpdateTabsToShowMode();
-            updateMixtureFit();
-            
-            // Show and update component distribution chart at the end
-            console.log('[RJMCMC] Showing and updating component distribution chart');
-            const posteriorDistContainer = document.getElementById('posteriorDistContainer');
-            if (posteriorDistContainer) {
-                posteriorDistContainer.style.display = 'block';
-            }
-            updateComponentDistribution();
-            
-            updateFinalResults();
+        updateFinalResults();
         } else {
             console.log(`[RJMCMC] Analysis was stopped early. isAnalysisRunning: ${isAnalysisRunning}`);
         }
@@ -541,45 +542,24 @@ function updateProgress(current, total, message) {
 }
 
 // Update visualizations
-function updateVisualizations(currentIteration = null) {
+function updateVisualizations() {
     try {
-        // Always update the most important plots (trace plots)
         updateComponentTracePlot();
         updateLogPosteriorPlot();
-        
-        // Use passed iteration or fall back to rjmcState.iterations
-        const iteration = currentIteration || rjmcState.iterations || 0;
-        console.log(`[RJMCMC] updateVisualizations called at iteration ${iteration}`);
-        
-        // Component distribution will be updated at the end of the run only
-        
-        // Update mixture fit every 100 iterations (expensive operation)
-        if (iteration % 100 === 0) {
-            console.log(`[RJMCMC] Updating mixture fit at iteration ${iteration}`);
-            updateMixtureTabs(); // Update tabs based on available K values
+        updateComponentDistribution();
         updateMixtureFit();
-        }
-        
-        // Update tab sample counts more frequently (every 50 iterations)
-        if (iteration % 50 === 0) {
-            updateTabSampleCounts();
-        }
-        
-        // Convergence diagnostics are now called independently every 100 iterations
-        
-        // Update parameter trace plots if dynamic updates are enabled
-        if (rjmcState.dynamicParameterPlots && iteration % 200 === 0) {
-            updateParameterTracePlots();
-        }
-        
     } catch (error) {
-        console.error('[RJMCMC] Failed to update visualizations:', error);
+        console.error('[RJMCMC] Error in updateVisualizations:', error);
     }
 }
 
 // Update final results
 function updateFinalResults() {
     try {
+        console.log('[RJMCMC] updateFinalResults called');
+        console.log('[RJMCMC] kProbabilities:', rjmcState.kProbabilities);
+        console.log('[RJMCMC] kHistory length:', rjmcState.kHistory.length);
+        
         // Calculate final K probabilities
         const totalIterations = rjmcState.kHistory.length;
         const kProbs = {};
@@ -587,10 +567,14 @@ function updateFinalResults() {
             kProbs[k] = count / totalIterations;
         }
         
+        console.log('[RJMCMC] Calculated kProbs:', kProbs);
+        
         // Find most probable K
         const mostProbableK = Object.keys(kProbs).reduce((a, b) => 
             kProbs[a] > kProbs[b] ? a : b
         );
+        
+        console.log('[RJMCMC] Most probable K:', mostProbableK);
         
         // Update displays
         const kElement = document.getElementById('current-k');
@@ -599,9 +583,19 @@ function updateFinalResults() {
         }
         
         updateKProbabilities(kProbs);
-        updateAllCharts();
         
-        console.log('[RJMCMC] Final results updated');
+        // Force update all charts
+        console.log('[RJMCMC] Updating all charts...');
+        updateComponentTracePlot();
+        updateLogPosteriorPlot();
+        updateComponentDistribution();
+        updateMixtureFit();
+        updateParameterTracePlots();
+        
+        // Force update mixture tabs
+        updateMixtureTabs();
+        
+        console.log('[RJMCMC] Final results updated successfully');
         
     } catch (error) {
         console.error('[RJMCMC] Failed to update final results:', error);
@@ -850,21 +844,23 @@ function updateLogPosteriorPlot() {
 
 // Update component distribution
 function updateComponentDistribution() {
+    console.log('[RJMCMC] updateComponentDistribution called');
+    console.log('[RJMCMC] kProbabilities:', rjmcState.kProbabilities);
+    
+    const chartElement = document.getElementById('componentDistChart');
+    if (!chartElement) {
+        console.error('[RJMCMC] componentDistChart element not found');
+        return;
+    }
+    
+    const ctx = chartElement.getContext('2d');
+    
+    if (componentDistChart) {
+        componentDistChart.destroy();
+    }
+    
     if (!rjmcState.kProbabilities || Object.keys(rjmcState.kProbabilities).length === 0) {
-        console.log('[RJMCMC] updateComponentDistribution: No kProbabilities available, creating empty chart');
-        
-        // Create empty chart if no data available
-        const chartElement = document.getElementById('componentDistChart');
-        if (!chartElement) {
-            console.error('[RJMCMC] componentDistChart element not found');
-            return;
-        }
-        
-        const ctx = chartElement.getContext('2d');
-        
-        if (componentDistChart) {
-            componentDistChart.destroy();
-        }
+        console.log('[RJMCMC] No kProbabilities available, creating empty chart');
         
         componentDistChart = new Chart(ctx, {
             type: 'bar',
@@ -998,6 +994,15 @@ function updateComponentDistribution() {
         
         // Calculate posterior means
         calculatePosteriorMeans();
+        
+        // Show the posterior distribution container
+        const container = document.getElementById('posteriorDistContainer');
+        if (container) {
+            container.style.display = 'block';
+            console.log('[RJMCMC] Posterior distribution container made visible');
+        } else {
+            console.error('[RJMCMC] posteriorDistContainer not found');
+        }
         
     } catch (error) {
         console.error('[RJMCMC] Failed to update component distribution:', error);
@@ -1226,59 +1231,91 @@ function updateConvergenceDiagnostics() {
 // Update ESS display
 function updateESSDisplay(ess) {
     console.log(`[RJMCMC] updateESSDisplay called with ESS: ${ess}`);
-    const essDisplay = document.getElementById('ess-display');
-    if (!essDisplay) {
-        console.log('[RJMCMC] ess-display element not found');
-        return;
+    
+    // Update the main ESS display
+    const essValue = document.getElementById('essValue');
+    if (essValue) {
+        essValue.textContent = ess;
     }
     
-    let status = 'convergence-poor';
-    if (ess > 1000) status = 'convergence-good';
-    else if (ess > 100) status = 'convergence-warning';
-    
-    essDisplay.innerHTML = `
-        <div class="diagnostic-value ${status}">${ess}</div>
-        <div class="diagnostic-label">K (Number of Components)</div>
-        <small>ESS > 1000: Good, ESS > 100: Acceptable, ESS < 100: Poor</small>
-    `;
+    // Also update the detailed display if it exists
+    const essDisplay = document.getElementById('ess-display');
+    if (essDisplay) {
+        let status = 'convergence-poor';
+        if (ess > 1000) status = 'convergence-good';
+        else if (ess > 100) status = 'convergence-warning';
+        
+        essDisplay.innerHTML = `
+            <div class="diagnostic-value ${status}">${ess}</div>
+            <div class="diagnostic-label">K (Number of Components)</div>
+            <small>ESS > 1000: Good, ESS > 100: Acceptable, ESS < 100: Poor</small>
+        `;
+    }
 }
 
 // Update Gelman-Rubin display
 function updateGelmanRubinDisplay(rhat) {
-    const grDisplay = document.getElementById('gelman-rubin-display');
-    if (!grDisplay) return;
-    
-    let status = 'convergence-poor';
-    let convergenceMessage = '';
-    if (rhat < 1.1) {
-        status = 'convergence-good';
-        convergenceMessage = '<div style="color: #28a745; font-weight: bold; margin-top: 5px;">✓ Evidence of convergence!</div>';
-    } else if (rhat < 1.2) {
-        status = 'convergence-warning';
+    // Update the main R-hat display
+    const rhatValue = document.getElementById('rhatValue');
+    const rhatLabel = document.getElementById('rhatLabel');
+    if (rhatValue) {
+        rhatValue.textContent = rhat.toFixed(3);
+    }
+    if (rhatLabel) {
+        if (rhat < 1.1) {
+            rhatLabel.textContent = '✓ Converged (R̂ < 1.1)';
+            rhatLabel.style.color = '#28a745';
+        } else if (rhat < 1.2) {
+            rhatLabel.textContent = '⚠ Acceptable (R̂ < 1.2)';
+            rhatLabel.style.color = '#ffc107';
+        } else {
+            rhatLabel.textContent = '❌ Poor convergence (R̂ > 1.2)';
+            rhatLabel.style.color = '#dc3545';
+        }
     }
     
-    grDisplay.innerHTML = `
-        <div class="diagnostic-value ${status}">${rhat.toFixed(3)}</div>
-        <div class="diagnostic-label">K (Number of Components)</div>
-        <small>R̂ < 1.1: Good, R̂ < 1.2: Acceptable, R̂ > 1.2: Poor</small>
-        ${convergenceMessage}
-    `;
+    // Also update the detailed display if it exists
+    const grDisplay = document.getElementById('gelman-rubin-display');
+    if (grDisplay) {
+        let status = 'convergence-poor';
+        let convergenceMessage = '';
+        if (rhat < 1.1) {
+            status = 'convergence-good';
+            convergenceMessage = '<div style="color: #28a745; font-weight: bold; margin-top: 5px;">✓ Evidence of convergence!</div>';
+        } else if (rhat < 1.2) {
+            status = 'convergence-warning';
+        }
+        
+        grDisplay.innerHTML = `
+            <div class="diagnostic-value ${status}">${rhat.toFixed(3)}</div>
+            <div class="diagnostic-label">K (Number of Components)</div>
+            <small>R̂ < 1.1: Good, R̂ < 1.2: Acceptable, R̂ > 1.2: Poor</small>
+            ${convergenceMessage}
+        `;
+    }
 }
 
 // Update acceptance rates display
 function updateAcceptanceRatesDisplay(rate) {
+    // Update the main acceptance rate display
+    const acceptanceValue = document.getElementById('acceptanceValue');
+    if (acceptanceValue) {
+        acceptanceValue.textContent = rate + '%';
+    }
+    
+    // Also update the detailed display if it exists
     const arDisplay = document.getElementById('acceptance-rates-display');
-    if (!arDisplay) return;
-    
-    let status = 'convergence-poor';
-    if (rate > 20 && rate < 50) status = 'convergence-good';
-    else if (rate > 10 && rate < 70) status = 'convergence-warning';
-    
-    arDisplay.innerHTML = `
-        <div class="diagnostic-value ${status}">${rate}%</div>
-        <div class="diagnostic-label">Overall Acceptance Rate</div>
-        <small>20-50%: Good, 10-70%: Acceptable, Outside: Poor</small>
-    `;
+    if (arDisplay) {
+        let status = 'convergence-poor';
+        if (rate > 20 && rate < 50) status = 'convergence-good';
+        else if (rate > 10 && rate < 70) status = 'convergence-warning';
+        
+        arDisplay.innerHTML = `
+            <div class="diagnostic-value ${status}">${rate}%</div>
+            <div class="diagnostic-label">Overall Acceptance Rate</div>
+            <small>20-50%: Good, 10-70%: Acceptable, Outside: Poor</small>
+        `;
+    }
 }
 
 // Generate parameter traces from current state
@@ -1367,13 +1404,16 @@ function updateFacetedParameterPlots(meanTraces, sigmaTraces, mostCommonK) {
     if (meanTraces.length === 0 || !mostCommonK) return;
     
     try {
-        const container = document.getElementById('facetedParameterPlots');
-        if (!container) return;
+        const container = document.getElementById('parameterTraceGrid');
+        if (!container) {
+            console.log('[RJMCMC] parameterTraceGrid container not found');
+            return;
+        }
         
         // Clear existing plots
         container.innerHTML = '';
         
-        // Set up container layout - always use vertical stacking (rows)
+        // Set up container layout - use vertical stacking (rows)
         container.style.display = 'flex';
         container.style.flexDirection = 'column';
         container.style.gap = '20px';
@@ -1383,22 +1423,18 @@ function updateFacetedParameterPlots(meanTraces, sigmaTraces, mostCommonK) {
         for (let compId = 0; compId < mostCommonK; compId++) {
             // Create container for this component
             const componentContainer = document.createElement('div');
-            componentContainer.className = 'component-plot';
-            
-            // Set width for vertical layout
-            componentContainer.style.width = '100%';
-            componentContainer.style.flexShrink = '0';
+            componentContainer.className = 'parameter-trace-item';
             
             componentContainer.innerHTML = `
-                <h4>Component ${compId + 1} (μ₁ < μ₂ < μ₃...)</h4>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; width: 100%; box-sizing: border-box;">
-                    <div style="width: 100%; box-sizing: border-box;">
-                        <h5 style="font-size: 0.75em; margin-bottom: 3px; text-align: center;">Mean (μ${compId + 1})</h5>
-                        <canvas id="meanChart_${compId}"></canvas>
+                <h4>Component ${compId + 1}</h4>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 10px; width: 100%;">
+                    <div style="width: 100%;">
+                        <h5 style="font-size: 0.9em; margin-bottom: 8px; text-align: center; font-weight: 600;">Mean (μ${compId + 1})</h5>
+                        <canvas id="meanChart_${compId}" class="parameter-trace-chart" style="width: 100%; height: 200px;"></canvas>
                     </div>
-                    <div style="width: 100%; box-sizing: border-box;">
-                        <h5 style="font-size: 0.75em; margin-bottom: 3px; text-align: center;">Std Dev (σ${compId + 1})</h5>
-                        <canvas id="sigmaChart_${compId}"></canvas>
+                    <div style="width: 100%;">
+                        <h5 style="font-size: 0.9em; margin-bottom: 8px; text-align: center; font-weight: 600;">Std Dev (σ${compId + 1})</h5>
+                        <canvas id="sigmaChart_${compId}" class="parameter-trace-chart" style="width: 100%; height: 200px;"></canvas>
                     </div>
                 </div>
             `;
@@ -1638,119 +1674,28 @@ function cleanupOldData() {
 // Update mixture fit
 function updateMixtureFit() {
     if (!currentData) {
-        console.log('[RJMCMC] updateMixtureFit: No currentData available');
+        console.log('[RJMCMC] No current data for mixture fit');
         return;
     }
     
+    const canvas = document.getElementById('mixtureFitChart');
+    if (!canvas) {
+        console.error('[RJMCMC] mixtureFitChart canvas not found');
+        return;
+    }
+    
+    const ctx = canvas.getContext('2d');
+    
+    if (mixtureFitChart) {
+        mixtureFitChart.destroy();
+    }
+    
     try {
-        console.log('[RJMCMC] updateMixtureFit: Updating mixture fit visualization');
-        const ctx = document.getElementById('mixtureFitChart').getContext('2d');
-        
-        if (mixtureFitChart) {
-            mixtureFitChart.destroy();
-        }
-        
-        // Calculate posterior means first
-        calculatePosteriorMeans();
-        
-        // Determine which fit to show based on current tab
-        let currentJump = null;
-        let tabLabel = '';
-        
-        console.log('[RJMCMC] updateMixtureFit - currentTab:', rjmcState.currentTab);
-        console.log('[RJMCMC] kPosteriorMeans:', rjmcState.kPosteriorMeans);
-        console.log('[RJMCMC] kPosteriorSamples:', rjmcState.kPosteriorSamples);
-        
-        if (rjmcState.currentTab && rjmcState.currentTab.startsWith('top')) {
-            const k = parseInt(rjmcState.currentTab.replace('top', ''));
-            console.log(`[RJMCMC] Looking for K=${k} posterior samples`);
-            
-            // Check if we have samples for this K
-            const samples = rjmcState.kPosteriorSamples[k];
-            if (samples && samples.length > 0) {
-                // Use posterior means if available, otherwise calculate them
-            if (rjmcState.kPosteriorMeans[k]) {
-                currentJump = rjmcState.kPosteriorMeans[k];
-                } else {
-                    // Calculate posterior means on the fly
-                    calculatePosteriorMeans();
-                    currentJump = rjmcState.kPosteriorMeans[k];
-                }
-                
-                const numSamples = samples.length;
-                tabLabel = `K=${k} Posterior Mean (${numSamples} samples)`;
-                console.log(`[RJMCMC] Found K=${k} with ${numSamples} samples`);
-            } else {
-                console.log(`[RJMCMC] No posterior samples found for K=${k}`);
-                
-                // Try to find a K value that has samples and switch to it
-                const availableKValues = Object.keys(rjmcState.kPosteriorSamples)
-                    .map(Number)
-                    .filter(kVal => rjmcState.kPosteriorSamples[kVal] && rjmcState.kPosteriorSamples[kVal].length > 0)
-                    .sort((a, b) => a - b);
-                
-                if (availableKValues.length > 0) {
-                    const newK = availableKValues[0];
-                    console.log(`[RJMCMC] Switching to K=${newK} which has ${rjmcState.kPosteriorSamples[newK].length} samples`);
-                    
-                    // Update the tab
-                    document.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
-                    document.getElementById(`tab-top${newK}`).classList.add('active');
-                    rjmcState.currentTab = `top${newK}`;
-                    
-                    // Recursively call with the new K
-                    return updateMixtureFit();
-                }
-            }
-        }
-        
-        if (!currentJump) {
-            // Show raw data histogram if no fit available
-            const histogram = createHistogram(currentData.obs, 40);
-            
-            mixtureFitChart = new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: histogram.x,
-                    datasets: [{
-                        label: 'Raw Data (No fit available yet)',
-                        data: histogram.y,
-                        backgroundColor: 'rgba(0,0,0,0.3)',
-                        borderColor: '#000000',
-                        borderWidth: 1
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        y: { 
-                            beginAtZero: true,
-                            max: Math.max(...histogram.y) * 1.2, // Set max to 120% of highest data point
-                            title: { display: true, text: 'Density' }
-                        },
-                        x: { 
-                            title: { display: true, text: 'Value' },
-                            autorange: true,
-                            fixedrange: false
-                        }
-                    },
-                    plugins: {
-                        title: {
-                            display: true,
-                            text: 'Mixture Model Fit - Waiting for MCMC data...'
-                        }
-                    }
-                }
-            });
-            return;
-        }
-        
-        // Create histogram of raw data
+        // Show raw data histogram
         const histogram = createHistogram(currentData.obs, 40);
         
         // Create fitted mixture density from posterior samples
-        const k = parseInt(rjmcState.currentTab.replace('top', ''));
+        const k = parseInt(rjmcState.currentTab ? rjmcState.currentTab.replace('top', '') : '2');
         const samples = rjmcState.kPosteriorSamples[k] || [];
         
         console.log(`[RJMCMC] Creating mixture fit for K=${k} with ${samples.length} samples`);
@@ -1792,33 +1737,41 @@ function updateMixtureFit() {
             });
         }
         
-        // Create datasets array
-        const datasets = [
-            {
-                label: 'Data',
-                data: histogram.y,
-                type: 'bar',
-                backgroundColor: 'rgba(0,0,0,0.3)',
-                borderColor: '#000000',
-                borderWidth: 1
-            },
-            {
-                label: samples.length > 0 ? `Fitted Mixture (${samples.length} samples)` : 'Fitted Mixture (No data yet)',
+        // Create datasets array - only show fitted mixture, not raw data
+        const datasets = [];
+        
+        // Only add fitted mixture if we have samples
+        if (samples.length > 0) {
+            datasets.push({
+                label: `Fitted Mixture (${samples.length} samples)`,
                 data: fittedDensity,
                 type: 'line',
-                borderColor: samples.length > 0 ? '#000000' : '#cccccc',
+                borderColor: '#000000',
+                backgroundColor: 'transparent',
+                borderWidth: 3,
+                fill: false,
+                tension: 0.1
+            });
+        } else {
+            // Show placeholder when no samples
+            datasets.push({
+                label: 'Fitted Mixture (No data yet)',
+                data: histogram.x.map(() => 0),
+                type: 'line',
+                borderColor: '#cccccc',
                 backgroundColor: 'transparent',
                 borderWidth: 2,
-                fill: false
-            }
-        ];
+                fill: false,
+                borderDash: [5, 5]
+            });
+        }
         
-        // Add vertical lines for component means
-        if (samples.length > 0 && currentJump && currentJump.mu) {
-                const maxDensity = Math.max(...fittedDensity);
-                const binWidth = parseFloat(histogram.x[1]) - parseFloat(histogram.x[0]);
-                
-            currentJump.mu.forEach((mean, index) => {
+        // Add vertical lines for component means if we have current jump data
+        if (samples.length > 0 && rjmcState.currentJump && rjmcState.currentJump.mu) {
+            const maxDensity = Math.max(...fittedDensity);
+            const binWidth = parseFloat(histogram.x[1]) - parseFloat(histogram.x[0]);
+            
+            rjmcState.currentJump.mu.forEach((mean, index) => {
                 // Find the bin index for the mean
                 const meanIndex = histogram.x.findIndex(x => {
                     const binCenter = parseFloat(x);
@@ -1830,29 +1783,28 @@ function updateMixtureFit() {
                     const meanLineData = new Array(histogram.x.length).fill(null);
                     meanLineData[meanIndex] = maxDensity * 0.9;
                 
-                datasets.push({
-                    label: `Component ${index + 1} Mean (${mean.toFixed(2)})`,
+                    datasets.push({
+                        label: `Component ${index + 1} Mean (${mean.toFixed(2)})`,
                         data: meanLineData,
-                    type: 'line',
-                    borderColor: `hsl(${index * 60}, 70%, 50%)`,
-                    backgroundColor: `hsl(${index * 60}, 70%, 50%)`,
+                        type: 'line',
+                        borderColor: `hsl(${index * 60}, 70%, 50%)`,
+                        backgroundColor: `hsl(${index * 60}, 70%, 50%)`,
                         borderWidth: 4,
                         pointRadius: 6,
                         pointHoverRadius: 8,
-                    fill: false,
-                    tension: 0,
+                        fill: false,
+                        tension: 0,
                         borderDash: [0, 0], // Solid line
                         showLine: true,
                         spanGaps: false
-                });
+                    });
                 }
             });
         }
         
-        // Calculate appropriate y-axis maximum
-        const maxHistogram = Math.max(...histogram.y);
+        // Calculate appropriate y-axis maximum based on fitted density only
         const maxFittedDensity = samples.length > 0 ? Math.max(...fittedDensity) : 0;
-        const yMax = Math.max(maxHistogram, maxFittedDensity) * 1.2;
+        const yMax = maxFittedDensity > 0 ? maxFittedDensity * 1.2 : 10; // Default max if no data
         
         mixtureFitChart = new Chart(ctx, {
             type: 'line',
@@ -1862,12 +1814,12 @@ function updateMixtureFit() {
             },
             options: {
                 responsive: true,
-                maintainAspectRatio: true,
-                aspectRatio: 2.5, // Set a reasonable aspect ratio
+                maintainAspectRatio: false,
+                height: 300, // Fixed height
                 scales: {
                     y: {
                         beginAtZero: true,
-                        max: yMax, // Set max based on both histogram and fitted density
+                        max: yMax, // Set max based on fitted density only
                         title: {
                             display: true,
                             text: 'Density'
@@ -1883,7 +1835,7 @@ function updateMixtureFit() {
                 plugins: {
                     title: {
                         display: true,
-                        text: tabLabel || 'Mixture Model Fit'
+                        text: 'Mixture Model Fit'
                     },
                     legend: {
                         display: true,
@@ -2028,9 +1980,9 @@ function showRawDataVisualization() {
         type: 'histogram',
         nbinsx: 40,
         marker: {
-            color: 'rgba(0,0,0,0.7)',
+            color: 'rgba(128,128,128,0.4)',
             line: {
-                color: '#000000',
+                color: 'rgba(128,128,128,0.8)',
                 width: 1
             }
         },
@@ -2048,9 +2000,9 @@ function showRawDataVisualization() {
             title: 'Value',
             showgrid: true,
             gridcolor: '#e0e0e0',
-                font: { family: 'Avenir, sans-serif' },
-                autorange: true,
-                fixedrange: false
+            font: { family: 'Avenir, sans-serif' },
+            autorange: true,
+            fixedrange: false
         },
         yaxis: {
             title: 'Frequency',
@@ -2060,10 +2012,13 @@ function showRawDataVisualization() {
             autorange: true,
             fixedrange: false
         },
-        margin: { l: 50, r: 20, t: 40, b: 50 },
+        margin: { l: 60, r: 20, t: 40, b: 60 },
         plot_bgcolor: 'rgba(0,0,0,0)',
         paper_bgcolor: 'rgba(0,0,0,0)',
-        font: { family: 'Avenir, sans-serif' }
+        font: { family: 'Avenir, sans-serif' },
+        autosize: true,
+        height: 300,
+        width: '100%'
     };
     
     const config = {
@@ -2092,8 +2047,11 @@ function switchMixtureTab(tabName) {
     console.log(`[RJMCMC] Switching to tab: ${tabName}`);
     
     // Update active tab button
-    document.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
-    document.getElementById(`tab-${tabName}`).classList.add('active');
+    document.querySelectorAll('.tab').forEach(btn => btn.classList.remove('active'));
+    const tabButton = document.getElementById(`tab-${tabName}`);
+    if (tabButton) {
+        tabButton.classList.add('active');
+    }
     
     // Update current tab
     rjmcState.currentTab = tabName;
@@ -2146,7 +2104,17 @@ function updateMixtureTabs() {
     
     // Update the tab container
     const tabsHeader = document.querySelector('.tabs-header');
-    if (!tabsHeader) return;
+    if (!tabsHeader) {
+        console.log('[RJMCMC] tabs-header not found, creating it');
+        const tabsContainer = document.getElementById('mixtureTabs');
+        if (tabsContainer) {
+            const header = document.createElement('div');
+            header.className = 'tabs-header';
+            tabsContainer.appendChild(header);
+            return updateMixtureTabs(); // Retry after creating header
+        }
+        return;
+    }
     
     // Check if we need to recreate tabs (new K values or different order)
     const existingTabs = Array.from(tabsHeader.children).map(btn => {
@@ -2172,7 +2140,7 @@ function updateMixtureTabs() {
             const isActive = index === 0; // First tab is active
             
             const button = document.createElement('button');
-            button.className = `tab-button ${isActive ? 'active' : ''}`;
+            button.className = `tab ${isActive ? 'active' : ''}`;
             button.id = `tab-top${k}`;
             button.textContent = `K=${k} (${percentage}%)`;
             button.onclick = () => switchMixtureTab(`top${k}`);
@@ -2285,7 +2253,7 @@ function forceUpdateTabsToShowMode() {
                 const isActive = index === 0; // First tab (mode) is active
                 
                 const button = document.createElement('button');
-                button.className = `tab-button ${isActive ? 'active' : ''}`;
+                button.className = `tab ${isActive ? 'active' : ''}`;
                 button.id = `tab-top${k}`;
                 button.textContent = `K=${k} (${percentage}%)`;
                 button.onclick = () => switchMixtureTab(`top${k}`);
@@ -2543,6 +2511,23 @@ function loadSampleData() {
     console.log('[RJMCMC] True parameters - Means:', trueMeans, 'Sigmas:', trueSigmas, 'Mixing props:', trueMixingProps);
 }
 
+// Stop RJMCMC analysis
+function stopRJMCMCAnalysis() {
+    if (rjmcState.isAnalysisRunning) {
+        rjmcState.isAnalysisRunning = false;
+        console.log('[RJMCMC] Analysis stopped by user');
+        
+        // Update UI
+        document.getElementById('startBtn').disabled = false;
+        document.getElementById('stopBtn').disabled = true;
+        
+        const status = document.getElementById('status');
+        status.className = 'status error';
+        status.textContent = 'Analysis stopped by user';
+        status.style.display = 'block';
+    }
+}
+
 // Initialize the application
 async function initSimpleApp() {
     try {
@@ -2565,11 +2550,11 @@ async function initSimpleApp() {
         // Component distribution chart will be shown at the end of the run
         
         // Initialize mixture fit with raw data
-        updateMixtureTabs(); // Create initial tabs
         updateMixtureFit();
         
-        // Set up automatic tab switching when data becomes available
-        setupAutoTabSwitching();
+        // Initialize component distribution
+        updateComponentDistribution();
+        
         
         // Show results container
         const resultsContainer = document.getElementById('resultsContainer');
@@ -2640,40 +2625,72 @@ async function startRJMCMCAnalysis() {
             updateInterval: 50
         };
         
+        // Set analysis running state
+        rjmcState.isAnalysisRunning = true;
+        
         // Disable button during analysis
-        const runAnalysisBtn = document.getElementById('runAnalysis');
-        if (runAnalysisBtn) {
-            runAnalysisBtn.disabled = true;
-            runAnalysisBtn.textContent = 'Running RJMCMC...';
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        if (startBtn) {
+            startBtn.disabled = true;
+            startBtn.textContent = 'Running Analysis...';
+        }
+        if (stopBtn) {
+            stopBtn.disabled = false;
+        }
+        
+        // Update status
+        const status = document.getElementById('status');
+        if (status) {
+            status.className = 'status running';
+            status.textContent = 'Starting RJMCMC analysis...';
+            status.style.display = 'block';
         }
         
         // Run analysis
         await runRJMCMCAnalysis(settings);
         
+        // Analysis completed
+        rjmcState.isAnalysisRunning = false;
+        
         // Re-enable button
-        if (runAnalysisBtn) {
-            runAnalysisBtn.disabled = false;
-            runAnalysisBtn.textContent = 'Start RJMCMC Analysis';
+        if (startBtn) {
+            startBtn.disabled = false;
+            startBtn.textContent = 'Start Analysis';
+        }
+        if (stopBtn) {
+            stopBtn.disabled = true;
+        }
+        
+        // Update status
+        if (status) {
+            status.className = 'status completed';
+            status.textContent = 'Analysis completed successfully!';
         }
         
     } catch (error) {
         console.error('[RJMCMC] RJMCMC analysis failed:', error);
         
+        // Reset analysis state
+        rjmcState.isAnalysisRunning = false;
+        
         // Re-enable button
-        const runAnalysisBtn = document.getElementById('runAnalysis');
-        if (runAnalysisBtn) {
-            runAnalysisBtn.disabled = false;
-            runAnalysisBtn.textContent = 'Start RJMCMC Analysis';
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        if (startBtn) {
+            startBtn.disabled = false;
+            startBtn.textContent = 'Start Analysis';
+        }
+        if (stopBtn) {
+            stopBtn.disabled = true;
         }
         
         // Show error
-        const errorMessage = document.getElementById('error-message');
-        const errorText = document.getElementById('error-text');
-        if (errorMessage) {
-            errorMessage.style.display = 'block';
-        }
-        if (errorText) {
-            errorText.textContent = `Analysis Error: ${error.message}`;
+        const status = document.getElementById('status');
+        if (status) {
+            status.className = 'status error';
+            status.textContent = `Analysis Error: ${error.message}`;
+            status.style.display = 'block';
         }
     }
 }
@@ -2708,6 +2725,47 @@ function loadDemoData() {
 }
 
 
+// Download posteriors function
+function downloadPosteriors() {
+    const k = parseInt(rjmcState.currentTab ? rjmcState.currentTab.replace('top', '') : '2');
+    const samples = rjmcState.kPosteriorSamples[k] || [];
+    
+    if (samples.length === 0) {
+        alert('No posterior samples available for download');
+        return;
+    }
+    
+    // Convert samples to CSV format
+    let csvContent = 'Sample,Component,Mean,Sigma,Proportion\n';
+    
+    samples.forEach((sample, sampleIndex) => {
+        const muValues = sample.jump.mu.slice();
+        const sigmaValues = sample.jump.sigma.slice();
+        const pValues = sample.jump.p.slice();
+        
+        // Order by mean values
+        const sortedIndices = muValues
+            .map((val, idx) => ({ val, idx }))
+            .sort((a, b) => a.val - b.val)
+            .map(item => item.idx);
+        
+        sortedIndices.forEach((originalIdx, compIndex) => {
+            csvContent += `${sampleIndex + 1},${compIndex + 1},${muValues[originalIdx]},${sigmaValues[originalIdx]},${pValues[originalIdx]}\n`;
+        });
+    });
+    
+    // Create and download file
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `posterior_samples_K${k}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+}
+
 // Make functions globally available
 window.initSimpleApp = initSimpleApp;
 window.startRJMCMCAnalysis = startRJMCMCAnalysis;
@@ -2715,6 +2773,7 @@ window.showRawDataVisualization = showRawDataVisualization;
 window.testPlotly = createSimpleTestPlot;
 window.testComponentPlot = testComponentTracePlot;
 window.loadDemoData = loadDemoData;
+window.downloadPosteriors = downloadPosteriors;
 
 // Add a simple test function
 window.testButton = function() {
