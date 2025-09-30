@@ -4,7 +4,7 @@ A web-based interactive widget for dynamically determining the number of compone
 
 ## 🌐 Live Demo
 
-The widget is automatically deployed to GitHub Pages: **[View Live Demo](https://dchodge.github.io/rjmc_widget/)**
+The widget is automatically deployed to GitHub Pages: **[View Live Demo](https://dchodge.github.io/rjmc-widget-mixture/)**
 
 ## 🚀 Features
 
